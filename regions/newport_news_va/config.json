@@ -1,0 +1,11 @@
+{
+  "region_name": "Newport News, VA",
+  "region_code": "NNVA",
+  "region_input_date1": "2009-01-01",
+  "region_input_date2": "2019-01-01",
+  "region_input_amount1": 110000,
+  "region_input_amount2": 300000,
+  "market_type": "Industrial/Shipyard",
+  "description": "Shipbuilding and industrial market",
+  "notes": "Strong industrial base with shipyard employment"
+}

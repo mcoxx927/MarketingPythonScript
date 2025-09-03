@@ -1,0 +1,11 @@
+{
+  "region_name": "Virginia Beach, VA",
+  "region_code": "VBCH",
+  "region_input_date1": "2010-01-01",
+  "region_input_date2": "2020-01-01",
+  "region_input_amount1": 150000,
+  "region_input_amount2": 400000,
+  "market_type": "Coastal Resort",
+  "description": "High-value coastal market with tourism influence",
+  "notes": "Higher thresholds due to coastal premium and resort properties"
+}

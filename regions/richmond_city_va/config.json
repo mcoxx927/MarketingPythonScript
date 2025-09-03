@@ -1,0 +1,11 @@
+{
+  "region_name": "Richmond City, VA",
+  "region_code": "RICH",
+  "region_input_date1": "2008-01-01",
+  "region_input_date2": "2018-01-01",
+  "region_input_amount1": 120000,
+  "region_input_amount2": 350000,
+  "market_type": "State Capital",
+  "description": "State capital with diverse urban market",
+  "notes": "Mixed market with government workers and urban professionals"
+}

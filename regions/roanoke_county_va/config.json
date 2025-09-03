@@ -1,0 +1,11 @@
+{
+  "region_name": "Roanoke County, VA",
+  "region_code": "ROACo",
+  "region_input_date1": "2017-09-03",
+  "region_input_date2": "2024-09-03", 
+  "region_input_amount1": 40000,
+  "region_input_amount2": 350000,
+  "market_type": "Rural",
+  "description": "Large rural city",
+  "notes": "Mix of rural and suburban development"
+}

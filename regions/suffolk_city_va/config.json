@@ -1,0 +1,11 @@
+{
+  "region_name": "Suffolk City, VA",
+  "region_code": "SUFF",
+  "region_input_date1": "2010-01-01",
+  "region_input_date2": "2020-01-01", 
+  "region_input_amount1": 140000,
+  "region_input_amount2": 350000,
+  "market_type": "Rural/Agricultural",
+  "description": "Large rural city with agricultural influence",
+  "notes": "Mix of rural and suburban development"
+}

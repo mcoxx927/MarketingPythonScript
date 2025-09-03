@@ -1,0 +1,11 @@
+{
+  "region_name": "Lynchburg City, VA",
+  "region_code": "LYN",
+  "region_input_date1": "2009-01-01",
+  "region_input_date2": "2019-01-01",
+  "region_input_amount1": 80000,
+  "region_input_amount2": 225000,
+  "market_type": "College Town",
+  "description": "College-influenced market with student housing",
+  "notes": "University presence affects rental and investment properties"
+}

@@ -1,0 +1,11 @@
+{
+  "region_name": "Norfolk City, VA",
+  "region_code": "NORF",
+  "region_input_date1": "2009-01-01",
+  "region_input_date2": "2019-01-01",
+  "region_input_amount1": 100000,
+  "region_input_amount2": 275000,
+  "market_type": "Naval/Port City",
+  "description": "Military-influenced market with naval base proximity",
+  "notes": "Military housing and port-related commercial properties"
+}

@@ -1,0 +1,11 @@
+{
+  "region_name": "Alexandria City, VA",
+  "region_code": "ALEX", 
+  "region_input_date1": "2008-01-01",
+  "region_input_date2": "2018-01-01",
+  "region_input_amount1": 200000,
+  "region_input_amount2": 600000,
+  "market_type": "DC Metro",
+  "description": "High-value DC metro market with historic properties",
+  "notes": "Premium market due to proximity to Washington DC"
+}

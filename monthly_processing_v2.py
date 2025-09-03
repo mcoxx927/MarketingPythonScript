@@ -1,0 +1,422 @@
+"""
+Multi-Region Monthly Real Estate Direct Mail Processing Script
+
+This enhanced version supports processing multiple regions with individual configurations,
+standardized file naming, and organized output structure.
+
+Usage:
+    python monthly_processing_v2.py --region roanoke_city_va
+    python monthly_processing_v2.py --all-regions  
+    python monthly_processing_v2.py --list-regions
+"""
+
+import logging
+import pandas as pd
+import argparse
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, List, Optional
+import re
+
+from multi_region_config import MultiRegionConfigManager
+from property_processor import PropertyProcessor
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # Console output
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def _detect_niche_type_from_filename(filename: str) -> str:
+    """Detect niche type from filename"""
+    filename_lower = filename.lower()
+    
+    if 'lien' in filename_lower:
+        return 'Liens'
+    elif 'foreclosure' in filename_lower or 'preforeclosure' in filename_lower:
+        return 'PreForeclosure'
+    elif 'bankrupt' in filename_lower:
+        return 'Bankruptcy'
+    elif 'landlord' in filename_lower or 'tired' in filename_lower:
+        return 'Landlord'
+    elif 'tax' in filename_lower and 'delinq' in filename_lower:
+        return 'Tax'
+    elif 'probate' in filename_lower:
+        return 'Probate'
+    elif 'interfamily' in filename_lower or 'family' in filename_lower:
+        return 'InterFamily'
+    elif 'cash' in filename_lower and 'buyer' in filename_lower:
+        return 'CashBuyer'
+    else:
+        return 'Other'
+
+def _normalize_address(address_str) -> str:
+    """Normalize address for matching"""
+    if pd.isna(address_str) or address_str == '':
+        return ''
+    
+    # Convert to string and normalize
+    addr = str(address_str).upper().strip()
+    
+    # Remove common variations
+    addr = addr.replace(' ST,', ' ST')
+    addr = addr.replace(' AVE,', ' AVE') 
+    addr = addr.replace(' RD,', ' RD')
+    addr = addr.replace(' DR,', ' DR')
+    addr = addr.replace(' BLVD,', ' BLVD')
+    
+    # Remove trailing commas and extra spaces
+    addr = addr.replace(',', ' ').strip()
+    
+    # Collapse multiple spaces
+    addr = re.sub(r'\\s+', ' ', addr)
+    
+    return addr
+
+def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche_type: str) -> tuple:
+    """
+    Update main region DataFrame with niche data.
+    
+    Returns:
+        tuple: (updates_count, inserts_count)
+    """
+    updates_count = 0
+    inserts_count = 0
+    
+    # Normalize addresses for matching
+    main_df['_NormalizedAddress'] = main_df['Address'].apply(_normalize_address)
+    niche_df['_NormalizedAddress'] = niche_df['Address'].apply(_normalize_address)
+    
+    # Create a set of main region addresses for fast lookup
+    main_addresses = set(main_df['_NormalizedAddress'])
+    
+    for idx, niche_row in niche_df.iterrows():
+        niche_address = niche_row['_NormalizedAddress']
+        
+        if niche_address == '':
+            continue  # Skip blank addresses
+            
+        if niche_address in main_addresses:
+            # UPDATE: Append niche type to existing priority code
+            mask = main_df['_NormalizedAddress'] == niche_address
+            
+            # Update priority codes for all matching addresses
+            for main_idx in main_df[mask].index:
+                current_priority = main_df.loc[main_idx, 'PriorityCode']
+                
+                # Append niche type if not already present
+                if niche_type not in current_priority:
+                    main_df.loc[main_idx, 'PriorityCode'] = f"{niche_type}-{current_priority}"
+                    main_df.loc[main_idx, 'PriorityName'] = f"{niche_type} Enhanced - {main_df.loc[main_idx, 'PriorityName']}"
+                    updates_count += 1
+        else:
+            # INSERT: Add new record with niche type as priority
+            new_record = {
+                'OwnerName': str(niche_row.get('Owner 1 Last Name', '')) + ' ' + str(niche_row.get('Owner 1 First Name', '')),
+                'Address': niche_row.get('Address', ''),
+                'Mailing Address': niche_row.get('Mailing Address', ''),
+                'Last Sale Date': niche_row.get('Last Sale Date', ''),
+                'Last Sale Amount': niche_row.get('Last Sale Amount', ''),
+                'Owner 1 Last Name': niche_row.get('Owner 1 Last Name', ''),
+                'Owner 1 First Name': niche_row.get('Owner 1 First Name', ''),
+                'City': niche_row.get('City', ''),
+                'State': niche_row.get('State', ''),
+                'Zip': niche_row.get('Zip', ''),
+                
+                # Classification flags (new records default to False)
+                'IsTrust': False,
+                'IsChurch': False,
+                'IsBusiness': False,
+                'IsOwnerOccupied': False,
+                'OwnerGrantorMatch': False,
+                
+                # Priority information 
+                'PriorityId': 99,  # Special ID for niche-only records
+                'PriorityCode': niche_type,
+                'PriorityName': f'{niche_type} List Only',
+                
+                # Processing metadata
+                'ParsedSaleDate': pd.to_datetime('1850-01-01'),  # Default very old date
+                'ParsedSaleAmount': None,
+                '_NormalizedAddress': niche_address
+            }
+            
+            # Add the new record to main DataFrame using loc
+            new_idx = len(main_df)
+            for key, value in new_record.items():
+                main_df.loc[new_idx, key] = value
+            inserts_count += 1
+    
+    # Clean up temporary column
+    main_df.drop(columns=['_NormalizedAddress'], inplace=True)
+    
+    return updates_count, inserts_count
+
+def process_region(region_key: str, config_manager: MultiRegionConfigManager) -> Dict:
+    """
+    Process a single region's files.
+    
+    Args:
+        region_key: Region identifier (e.g., 'roanoke_city_va')
+        config_manager: Configuration manager instance
+        
+    Returns:
+        Dictionary with processing results
+    """
+    print("=" * 70)
+    print(f"PROCESSING REGION: {region_key.upper()}")
+    print("=" * 70)
+    
+    # Get region configuration
+    config = config_manager.get_region_config(region_key)
+    region_dir = config_manager.get_region_directory(region_key)
+    output_dir = config_manager.create_output_directory(region_key)
+    
+    # Set up region-specific logging
+    log_file = output_dir / f"processing_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+    
+    try:
+        print(f"Region: {config.region_name}")
+        print(f"Market Type: {config.market_type}")
+        print(f"ABS1 Date Cutoff: {config.region_input_date1.strftime('%Y-%m-%d')}")
+        print(f"BUY Date Cutoff: {config.region_input_date2.strftime('%Y-%m-%d')}")
+        print(f"Amount Thresholds: ${config.region_input_amount1:,} / ${config.region_input_amount2:,}")
+        print(f"Files Directory: {region_dir}")
+        print(f"Output Directory: {output_dir}")
+        print()
+        
+        # Validate region files
+        validation = config_manager.validate_region_files(region_key)
+        if not validation['valid']:
+            print("ERROR: Region validation failed!")
+            print(f"  Has Config: {validation['has_config']}")
+            print(f"  Has Main File: {validation['has_main_file']}")
+            print(f"  Has Excel Files: {validation['has_excel_files']}")
+            print(f"  Total Files: {validation['total_files']}")
+            return {'success': False, 'error': 'Region validation failed'}
+        
+        print(f"Region validation passed - found {validation['total_files']} Excel files")
+        
+        # 1. PROCESS MAIN REGION FILE
+        print("\\nSTEP 1: Processing Main Region File")
+        print("-" * 50)
+        
+        # Find Excel files
+        excel_files = list(region_dir.glob("*.xlsx"))
+        
+        # Find main region file (largest or specifically named)
+        main_file = None
+        for excel_file in excel_files:
+            if 'main_region' in excel_file.name.lower():
+                main_file = excel_file
+                break
+        
+        if main_file is None:
+            # Fall back to largest file
+            main_file = max(excel_files, key=lambda f: f.stat().st_size)
+        
+        print(f"Processing main file: {main_file.name} ({main_file.stat().st_size:,} bytes)")
+        
+        # Create property processor with region-specific settings
+        processor = PropertyProcessor(
+            region_input_date1=config.region_input_date1,
+            region_input_date2=config.region_input_date2,
+            region_input_amount1=config.region_input_amount1,
+            region_input_amount2=config.region_input_amount2
+        )
+        
+        # Process main file
+        main_result = processor.process_excel_file(str(main_file))
+        
+        print(f"SUCCESS: Main region processed - {len(main_result):,} records")
+        
+        # 2. PROCESS NICHE LISTS
+        print("\\nSTEP 2: Processing Niche Lists (Updating Main Region)")
+        print("-" * 50)
+        
+        niche_files = [f for f in excel_files if f != main_file]
+        total_updates = 0
+        total_inserts = 0
+        
+        if niche_files:
+            for niche_file in niche_files:
+                try:
+                    print(f"Processing niche: {niche_file.name}")
+                    
+                    # Determine niche type from filename
+                    niche_type = _detect_niche_type_from_filename(str(niche_file.name))
+                    
+                    # Read niche file
+                    niche_df = pd.read_excel(niche_file)
+                    print(f"   Loaded {len(niche_df):,} niche records")
+                    
+                    # Update main region with niche data
+                    updates, inserts = _update_main_with_niche(main_result, niche_df, niche_type)
+                    
+                    total_updates += updates
+                    total_inserts += inserts
+                    
+                    print(f"   SUCCESS: {niche_type}: {updates:,} updated, {inserts:,} inserted")
+                    
+                except Exception as e:
+                    print(f"   ERROR: Error processing {niche_file.name}: {e}")
+                    logger.error(f"Error processing {niche_file.name}: {e}")
+                    
+            print(f"\\nNICHE PROCESSING SUMMARY:")
+            print(f"   Total Updated Records: {total_updates:,}")
+            print(f"   Total Inserted Records: {total_inserts:,}")
+            print(f"   Final Record Count: {len(main_result):,}")
+            
+        else:
+            print("No niche files found")
+        
+        # 3. SAVE RESULTS
+        print("\\nSTEP 3: Saving Results")
+        print("-" * 50)
+        
+        # Save enhanced main region file
+        main_output = output_dir / f"main_region_enhanced_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        main_result.to_excel(main_output, index=False)
+        print(f"Enhanced main region saved: {main_output.name}")
+        
+        # Generate summary report
+        summary_data = {
+            'region_name': config.region_name,
+            'region_code': config.region_code,
+            'processing_date': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'total_records': len(main_result),
+            'original_records': len(main_result) - total_inserts,
+            'updated_records': total_updates,
+            'inserted_records': total_inserts,
+            'niche_files_processed': len(niche_files)
+        }
+        
+        # Priority distribution
+        priority_dist = main_result['PriorityCode'].value_counts().head(10)
+        
+        print("\\nFINAL SUMMARY")
+        print("=" * 70)
+        print(f"Region: {config.region_name}")
+        print(f"Total Records: {len(main_result):,}")
+        print(f"Updated with Niche Data: {total_updates:,}")
+        print(f"New from Niche Lists: {total_inserts:,}")
+        
+        print(f"\\nTOP PRIORITY CODES:")
+        for priority, count in priority_dist.items():
+            pct = (count / len(main_result)) * 100
+            print(f"   {priority}: {count:,} ({pct:.1f}%)")
+        
+        print(f"\\nOutput saved to: {output_dir}")
+        print("=" * 70)
+        
+        # Clean up logging handler
+        logger.removeHandler(file_handler)
+        file_handler.close()
+        
+        return {
+            'success': True,
+            'region_name': config.region_name,
+            'total_records': len(main_result),
+            'updated_records': total_updates,
+            'inserted_records': total_inserts,
+            'output_file': str(main_output)
+        }
+        
+    except Exception as e:
+        logger.error(f"Processing failed for {region_key}: {e}")
+        print(f"\\nERROR: Processing failed - {e}")
+        
+        # Clean up logging handler
+        logger.removeHandler(file_handler)
+        file_handler.close()
+        
+        return {'success': False, 'error': str(e)}
+
+def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(
+        description="Multi-Region Real Estate Direct Mail Processor",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python monthly_processing_v2.py --region roanoke_city_va
+  python monthly_processing_v2.py --all-regions  
+  python monthly_processing_v2.py --list-regions
+        """
+    )
+    
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--region", help="Process specific region (e.g., roanoke_city_va)")
+    group.add_argument("--all-regions", action="store_true", help="Process all regions")
+    group.add_argument("--list-regions", action="store_true", help="List available regions")
+    
+    args = parser.parse_args()
+    
+    try:
+        # Initialize configuration manager
+        config_manager = MultiRegionConfigManager()
+        
+        if args.list_regions:
+            print("\\n=== AVAILABLE REGIONS ===")
+            print(f"{'CODE':<6} | {'REGION NAME':<25} | {'MARKET TYPE':<18} | {'DESCRIPTION'}")
+            print("-" * 80)
+            
+            for region in config_manager.list_regions():
+                print(f"{region['code']:<6} | {region['name']:<25} | {region['market_type']:<18} | {region['description']}")
+            
+            print(f"\\nTotal regions configured: {len(config_manager.configs)}")
+            
+        elif args.region:
+            # Process single region
+            result = process_region(args.region, config_manager)
+            
+            if result['success']:
+                print("\\n[SUCCESS] Processing completed successfully!")
+            else:
+                print(f"\\n[ERROR] Processing failed: {result.get('error', 'Unknown error')}")
+                exit(1)
+                
+        elif args.all_regions:
+            # Process all regions
+            print("\\n[BATCH] PROCESSING ALL REGIONS")
+            print("=" * 70)
+            
+            results = []
+            for region_key in config_manager.configs.keys():
+                print(f"\\nStarting {region_key}...")
+                result = process_region(region_key, config_manager)
+                results.append(result)
+            
+            # Summary of all regions
+            print("\\n\\n[SUMMARY] BATCH PROCESSING SUMMARY")
+            print("=" * 70)
+            
+            successful = [r for r in results if r.get('success', False)]
+            failed = [r for r in results if not r.get('success', False)]
+            
+            print(f"Successfully processed: {len(successful)} regions")
+            print(f"Failed: {len(failed)} regions")
+            
+            if successful:
+                total_records = sum(r.get('total_records', 0) for r in successful)
+                print(f"Total records processed: {total_records:,}")
+            
+            if failed:
+                print(f"\\n[FAILED] Failed regions:")
+                for result in failed:
+                    print(f"  - {result.get('region_name', 'Unknown')}: {result.get('error', 'Unknown error')}")
+    
+    except Exception as e:
+        logger.error(f"Application error: {e}")
+        print(f"\\n[ERROR] Application error: {e}")
+        exit(1)
+
+if __name__ == "__main__":
+    main()

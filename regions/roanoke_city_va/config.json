@@ -1,0 +1,11 @@
+{
+  "region_name": "Roanoke City, VA",
+  "region_code": "ROAK",
+  "region_input_date1": "2017-09-03",
+  "region_input_date2": "2024-09-03", 
+  "region_input_amount1": 75000,
+  "region_input_amount2": 200000,
+  "market_type": "Rural/Small City",
+  "description": "Conservative rural market with lower property values",
+  "notes": "Original test region - validated thresholds"
+}

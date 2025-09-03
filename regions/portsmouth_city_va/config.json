@@ -1,0 +1,11 @@
+{
+  "region_name": "Portsmouth City, VA", 
+  "region_code": "PORT",
+  "region_input_date1": "2009-01-01",
+  "region_input_date2": "2019-01-01",
+  "region_input_amount1": 85000,
+  "region_input_amount2": 225000,
+  "market_type": "Urban Core",
+  "description": "Historic urban core with revitalization efforts",
+  "notes": "Lower property values with renovation opportunities"
+}

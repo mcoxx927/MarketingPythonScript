@@ -1,0 +1,11 @@
+{
+  "region_name": "Chesapeake City, VA",
+  "region_code": "CHES",
+  "region_input_date1": "2010-01-01", 
+  "region_input_date2": "2020-01-01",
+  "region_input_amount1": 125000,
+  "region_input_amount2": 325000,
+  "market_type": "Suburban",
+  "description": "Large suburban city with mixed residential",
+  "notes": "Growing suburban market with newer developments"
+}
