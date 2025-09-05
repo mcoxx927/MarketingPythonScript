@@ -369,6 +369,47 @@ class PropertyPriorityScorer:
             logger.debug(f"Could not parse amount: {amount_val}")
             return None
 
+    def _enhance_priority_with_main_file_fields(self, row: pd.Series, priority_code: str) -> str:
+        """
+        Enhance priority code with main file field indicators (Vacant, Lien, Bankruptcy, PreForeclosure).
+        Similar to niche list processing but for fields within the main file.
+        
+        Args:
+            row: Property data row
+            priority_code: Original priority code (e.g., "DEFAULT", "OWN1", "ABS1")
+            
+        Returns:
+            Enhanced priority code with prefixes (e.g., "Vacant-DEFAULT", "Lien-OWN1")
+        """
+        enhancements = []
+        
+        # Check Vacant field
+        vacant = row.get('Vacant', '')
+        if pd.notna(vacant) and str(vacant).lower() in ['yes', 'true', '1', 'y']:
+            enhancements.append('Vacant')
+        
+        # Check Lien Type field  
+        lien_type = row.get('Lien Type', '')
+        if pd.notna(lien_type) and str(lien_type).strip() != '':
+            enhancements.append('Lien')
+        
+        # Check BK Date field
+        bk_date = row.get('BK Date', '')
+        if pd.notna(bk_date) and str(bk_date).strip() != '':
+            enhancements.append('Bankruptcy')
+        
+        # Check Pre-FC Recording Date field
+        prefc_date = row.get('Pre-FC Recording Date', '')
+        if pd.notna(prefc_date) and str(prefc_date).strip() != '':
+            enhancements.append('PreForeclosure')
+        
+        # Build enhanced priority code with prefixes
+        if enhancements:
+            prefix = '-'.join(enhancements)
+            return f"{prefix}-{priority_code}"
+        
+        return priority_code
+
 class PropertyProcessor:
     """
     Main property processing class that orchestrates the entire pipeline.
@@ -456,6 +497,15 @@ class PropertyProcessor:
             # Score priority (using original row data - scorer handles parsing internally)
             priority = self.scorer.score_property(row, classification)
             
+            # Enhance priority code with main file field indicators
+            enhanced_priority_code = self.scorer._enhance_priority_with_main_file_fields(row, priority.priority_code)
+            enhanced_priority_name = priority.priority_name
+            
+            # Update priority name if enhanced
+            if enhanced_priority_code != priority.priority_code:
+                prefix = enhanced_priority_code.replace(f"-{priority.priority_code}", "")
+                enhanced_priority_name = f"{prefix} Enhanced - {priority.priority_name}"
+            
             # Update DataFrame
             df.at[idx, 'IsTrust'] = classification.is_trust
             df.at[idx, 'IsChurch'] = classification.is_church  
@@ -463,8 +513,8 @@ class PropertyProcessor:
             df.at[idx, 'IsOwnerOccupied'] = classification.is_owner_occupied
             df.at[idx, 'OwnerGrantorMatch'] = classification.owner_grantor_match
             df.at[idx, 'PriorityId'] = priority.priority_id
-            df.at[idx, 'PriorityCode'] = priority.priority_code
-            df.at[idx, 'PriorityName'] = priority.priority_name
+            df.at[idx, 'PriorityCode'] = enhanced_priority_code
+            df.at[idx, 'PriorityName'] = enhanced_priority_name
             
             # Update parsing tracking columns
             df.at[idx, 'ParsedSaleDate'] = parsed_date
