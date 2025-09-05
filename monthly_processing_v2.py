@@ -31,6 +31,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Constants
+NICHE_ONLY_PRIORITY_ID = 99
+VERY_OLD_DATE_STR = '1850-01-01'
+
 def _detect_niche_type_from_filename(filename: str) -> str:
     """Detect niche type from filename"""
     filename_lower = filename.lower()
@@ -91,68 +95,75 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
     main_df['_NormalizedAddress'] = main_df['Address'].apply(_normalize_address)
     niche_df['_NormalizedAddress'] = niche_df['Address'].apply(_normalize_address)
     
-    # Create a set of main region addresses for fast lookup
-    main_addresses = set(main_df['_NormalizedAddress'])
+    # Create dictionary mapping addresses to main DataFrame indices for fast lookup
+    main_address_map = main_df.groupby('_NormalizedAddress').groups
     
-    for idx, niche_row in niche_df.iterrows():
-        niche_address = niche_row['_NormalizedAddress']
-        
-        if niche_address == '':
-            continue  # Skip blank addresses
+    # Separate niche records into updates and inserts
+    niche_df_clean = niche_df[niche_df['_NormalizedAddress'] != ''].copy()
+    
+    # Vectorized matching - find which niche addresses exist in main
+    existing_addresses = niche_df_clean['_NormalizedAddress'].isin(main_address_map.keys())
+    
+    # Process updates in bulk
+    update_addresses = niche_df_clean[existing_addresses]['_NormalizedAddress'].unique()
+    
+    for address in update_addresses:
+        if address in main_address_map:
+            main_indices = main_address_map[address]
             
-        if niche_address in main_addresses:
-            # UPDATE: Append niche type to existing priority code
-            mask = main_df['_NormalizedAddress'] == niche_address
-            
-            # Update priority codes for all matching addresses
-            for main_idx in main_df[mask].index:
+            # Update all main records with this address
+            for main_idx in main_indices:
                 current_priority = main_df.loc[main_idx, 'PriorityCode']
                 
-                # Append niche type if not already present
                 if niche_type not in current_priority:
                     main_df.loc[main_idx, 'PriorityCode'] = f"{niche_type}-{current_priority}"
                     main_df.loc[main_idx, 'PriorityName'] = f"{niche_type} Enhanced - {main_df.loc[main_idx, 'PriorityName']}"
                     updates_count += 1
-        else:
-            # INSERT: Add new record with niche type as priority
-            new_record = {
-                'OwnerName': str(niche_row.get('Owner 1 Last Name', '')) + ' ' + str(niche_row.get('Owner 1 First Name', '')),
-                'Address': niche_row.get('Address', ''),
-                'Mailing Address': niche_row.get('Mailing Address', ''),
-                'Last Sale Date': niche_row.get('Last Sale Date', ''),
-                'Last Sale Amount': niche_row.get('Last Sale Amount', ''),
-                'Owner 1 Last Name': niche_row.get('Owner 1 Last Name', ''),
-                'Owner 1 First Name': niche_row.get('Owner 1 First Name', ''),
-                'City': niche_row.get('City', ''),
-                'State': niche_row.get('State', ''),
-                'Zip': niche_row.get('Zip', ''),
-                
-                # Classification flags (new records default to False)
-                'IsTrust': False,
-                'IsChurch': False,
-                'IsBusiness': False,
-                'IsOwnerOccupied': False,
-                'OwnerGrantorMatch': False,
-                
-                # Priority information 
-                'PriorityId': 99,  # Special ID for niche-only records
-                'PriorityCode': niche_type,
-                'PriorityName': f'{niche_type} List Only',
-                
-                # Processing metadata
-                'ParsedSaleDate': pd.to_datetime('1850-01-01'),  # Default very old date
-                'ParsedSaleAmount': None,
-                '_NormalizedAddress': niche_address
-            }
-            
-            # Add the new record to main DataFrame using loc
-            new_idx = len(main_df)
-            for key, value in new_record.items():
-                main_df.loc[new_idx, key] = value
-            inserts_count += 1
     
-    # Clean up temporary column
-    main_df.drop(columns=['_NormalizedAddress'], inplace=True)
+    # Process inserts in bulk
+    insert_records = niche_df_clean[~existing_addresses].copy()
+    
+    if len(insert_records) > 0:
+        # Create new records DataFrame
+        new_records = pd.DataFrame({
+            'OwnerName': insert_records.get('Owner 1 Last Name', '').astype(str) + ' ' + insert_records.get('Owner 1 First Name', '').astype(str),
+            'Address': insert_records.get('Address', ''),
+            'Mailing Address': insert_records.get('Mailing Address', ''),
+            'Last Sale Date': insert_records.get('Last Sale Date', ''),
+            'Last Sale Amount': insert_records.get('Last Sale Amount', ''),
+            'Owner 1 Last Name': insert_records.get('Owner 1 Last Name', ''),
+            'Owner 1 First Name': insert_records.get('Owner 1 First Name', ''),
+            'City': insert_records.get('City', ''),
+            'State': insert_records.get('State', ''),
+            'Zip': insert_records.get('Zip', ''),
+            
+            # Classification flags (new records default to False)
+            'IsTrust': False,
+            'IsChurch': False,
+            'IsBusiness': False,
+            'IsOwnerOccupied': False,
+            'OwnerGrantorMatch': False,
+            
+            # Priority information 
+            'PriorityId': NICHE_ONLY_PRIORITY_ID,
+            'PriorityCode': niche_type,
+            'PriorityName': f'{niche_type} List Only',
+            
+            # Processing metadata
+            'ParsedSaleDate': pd.to_datetime(VERY_OLD_DATE_STR),
+            'ParsedSaleAmount': None,
+            '_NormalizedAddress': insert_records['_NormalizedAddress']
+        })
+        
+        # Concatenate new records to main DataFrame
+        main_df = pd.concat([main_df, new_records], ignore_index=True)
+        inserts_count = len(insert_records)
+    
+    # Clean up temporary column from both DataFrames
+    if '_NormalizedAddress' in main_df.columns:
+        main_df.drop(columns=['_NormalizedAddress'], inplace=True)
+    if '_NormalizedAddress' in niche_df.columns:
+        niche_df.drop(columns=['_NormalizedAddress'], inplace=True)
     
     return updates_count, inserts_count
 
@@ -273,24 +284,52 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager) ->
                 try:
                     print(f"Processing niche: {niche_file.name}")
                     
+                    # Validate niche file
+                    if not niche_file.exists() or niche_file.stat().st_size == 0:
+                        print(f"   WARNING: Skipping empty or missing file: {niche_file.name}")
+                        continue
+                    
                     # Determine niche type from filename
                     niche_type = _detect_niche_type_from_filename(str(niche_file.name))
                     
-                    # Read niche file
-                    niche_df = pd.read_excel(niche_file)
+                    # Read niche file with validation and memory optimization
+                    try:
+                        niche_df = pd.read_excel(niche_file, dtype={'FIPS': 'category'})
+                        
+                        # Optimize memory usage for niche files, but protect key columns
+                        protected_columns = {'Owner 1 Last Name', 'Owner 1 First Name', 'Address', 'Mailing Address'}
+                        string_columns = niche_df.select_dtypes(include=['object']).columns
+                        for col in string_columns:
+                            if (col not in protected_columns and 
+                                niche_df[col].nunique() / len(niche_df) < 0.5):
+                                niche_df[col] = niche_df[col].astype('category')
+                                
+                    except Exception as read_error:
+                        print(f"   ERROR: Cannot read {niche_file.name}: {read_error}")
+                        logger.error(f"Cannot read {niche_file.name}: {read_error}")
+                        continue
+                    
+                    if niche_df.empty:
+                        print(f"   WARNING: Empty niche file: {niche_file.name}")
+                        continue
+                        
                     print(f"   Loaded {len(niche_df):,} niche records")
                     
                     # Update main region with niche data
-                    updates, inserts = _update_main_with_niche(main_result, niche_df, niche_type)
-                    
-                    total_updates += updates
-                    total_inserts += inserts
-                    
-                    print(f"   SUCCESS: {niche_type}: {updates:,} updated, {inserts:,} inserted")
+                    try:
+                        updates, inserts = _update_main_with_niche(main_result, niche_df, niche_type)
+                        
+                        total_updates += updates
+                        total_inserts += inserts
+                        
+                        print(f"   SUCCESS: {niche_type}: {updates:,} updated, {inserts:,} inserted")
+                    except Exception as update_error:
+                        print(f"   ERROR: Failed to process {niche_type} data: {update_error}")
+                        logger.error(f"Failed to process {niche_type} data from {niche_file.name}: {update_error}")
                     
                 except Exception as e:
-                    print(f"   ERROR: Error processing {niche_file.name}: {e}")
-                    logger.error(f"Error processing {niche_file.name}: {e}")
+                    print(f"   ERROR: Unexpected error processing {niche_file.name}: {e}")
+                    logger.error(f"Unexpected error processing {niche_file.name}: {e}")
                     
             print(f"\\nNICHE PROCESSING SUMMARY:")
             print(f"   Total Updated Records: {total_updates:,}")
@@ -305,9 +344,15 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager) ->
         print("-" * 50)
         
         # Save enhanced main region file with region name
-        main_output = output_dir / f"{region_code}_main_region_enhanced_{datetime.now().strftime('%Y%m%d')}.xlsx"
-        main_result.to_excel(main_output, index=False)
-        print(f"Enhanced main region saved: {main_output.name}")
+        try:
+            main_output = output_dir / f"{region_code}_main_region_enhanced_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            main_result.to_excel(main_output, index=False)
+            print(f"Enhanced main region saved: {main_output.name}")
+        except Exception as e:
+            error_msg = f"Failed to save main output file: {e}"
+            print(f"ERROR: {error_msg}")
+            logger.error(error_msg)
+            return {'success': False, 'error': error_msg}
         
         # Save optional summary report with region name
         summary_output = output_dir / f"{region_code}_processing_summary_{datetime.now().strftime('%Y%m%d')}.xlsx"
