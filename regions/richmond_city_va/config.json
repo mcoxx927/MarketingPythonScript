@@ -1,6 +1,7 @@
 {
   "region_name": "Richmond City, VA",
   "region_code": "RICH",
+  "fips_code": "51760",
   "region_input_date1": "2008-01-01",
   "region_input_date2": "2018-01-01",
   "region_input_amount1": 120000,

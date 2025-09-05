@@ -1,6 +1,7 @@
 {
   "region_name": "Alexandria City, VA",
-  "region_code": "ALEX", 
+  "region_code": "ALEX",
+  "fips_code": "51510", 
   "region_input_date1": "2008-01-01",
   "region_input_date2": "2018-01-01",
   "region_input_amount1": 200000,

@@ -1,6 +1,7 @@
 {
   "region_name": "Roanoke City, VA",
   "region_code": "ROAK",
+  "fips_code": "51770",
   "region_input_date1": "2017-09-03",
   "region_input_date2": "2024-09-03", 
   "region_input_amount1": 75000,

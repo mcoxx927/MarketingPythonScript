@@ -1,6 +1,7 @@
 {
   "region_name": "Norfolk City, VA",
   "region_code": "NORF",
+  "fips_code": "51710",
   "region_input_date1": "2009-01-01",
   "region_input_date2": "2019-01-01",
   "region_input_amount1": 100000,

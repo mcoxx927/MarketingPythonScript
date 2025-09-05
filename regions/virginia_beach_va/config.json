@@ -1,6 +1,7 @@
 {
   "region_name": "Virginia Beach, VA",
   "region_code": "VBCH",
+  "fips_code": "51810",
   "region_input_date1": "2010-01-01",
   "region_input_date2": "2020-01-01",
   "region_input_amount1": 150000,

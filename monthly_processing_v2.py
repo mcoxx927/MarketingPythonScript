@@ -175,9 +175,10 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager) ->
     config = config_manager.get_region_config(region_key)
     region_dir = config_manager.get_region_directory(region_key)
     output_dir = config_manager.create_output_directory(region_key)
+    region_code = config.region_code.lower()  # Define once for consistent use
     
-    # Set up region-specific logging
-    log_file = output_dir / f"processing_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
+    # Set up region-specific logging with region name
+    log_file = output_dir / f"{region_code}_processing_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
     file_handler = logging.FileHandler(log_file)
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     logger.addHandler(file_handler)
@@ -203,6 +204,28 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager) ->
             return {'success': False, 'error': 'Region validation failed'}
         
         print(f"Region validation passed - found {validation['total_files']} Excel files")
+        
+        # Validate FIPS codes in all files
+        print("Validating FIPS codes...")
+        fips_validation = config_manager.validate_fips_codes(region_key)
+        
+        if not fips_validation['all_valid']:
+            print("ERROR: FIPS validation failed!")
+            print(f"  Expected FIPS: {fips_validation['region_fips']}")
+            print(f"  Files checked: {fips_validation['files_checked']}")
+            print(f"  Files valid: {fips_validation['files_valid']}")
+            
+            if fips_validation['missing_fips_column']:
+                print(f"  Missing FIPS column in: {', '.join(fips_validation['missing_fips_column'])}")
+            
+            if fips_validation['fips_mismatches']:
+                print("  FIPS code mismatches:")
+                for mismatch in fips_validation['fips_mismatches']:
+                    print(f"    {mismatch['file']}: expected {mismatch['expected']}, found {mismatch['found']}")
+            
+            return {'success': False, 'error': 'FIPS validation failed - files contain wrong region data'}
+        
+        print(f"FIPS validation passed - all {fips_validation['files_checked']} files match region {fips_validation['region_fips']}")
         
         # 1. PROCESS MAIN REGION FILE
         print("\\nSTEP 1: Processing Main Region File")
@@ -281,10 +304,13 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager) ->
         print("\\nSTEP 3: Saving Results")
         print("-" * 50)
         
-        # Save enhanced main region file
-        main_output = output_dir / f"main_region_enhanced_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        # Save enhanced main region file with region name
+        main_output = output_dir / f"{region_code}_main_region_enhanced_{datetime.now().strftime('%Y%m%d')}.xlsx"
         main_result.to_excel(main_output, index=False)
         print(f"Enhanced main region saved: {main_output.name}")
+        
+        # Save optional summary report with region name
+        summary_output = output_dir / f"{region_code}_processing_summary_{datetime.now().strftime('%Y%m%d')}.xlsx"
         
         # Generate summary report
         summary_data = {
@@ -300,6 +326,28 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager) ->
         
         # Priority distribution
         priority_dist = main_result['PriorityCode'].value_counts().head(10)
+        
+        # Create summary report DataFrame
+        priority_data = []
+        for priority, count in priority_dist.items():
+            pct = (count / len(main_result)) * 100
+            priority_data.append({
+                'Priority_Code': priority,
+                'Count': count,
+                'Percentage': round(pct, 1)
+            })
+        
+        # Save summary report  
+        try:
+            with pd.ExcelWriter(summary_output) as writer:
+                # Summary sheet
+                pd.DataFrame([summary_data]).to_excel(writer, sheet_name='Summary', index=False)
+                # Priority distribution sheet
+                pd.DataFrame(priority_data).to_excel(writer, sheet_name='Priority_Distribution', index=False)
+            
+            print(f"Summary report saved: {summary_output.name}")
+        except Exception as e:
+            print(f"Warning: Could not save summary report: {e}")
         
         print("\\nFINAL SUMMARY")
         print("=" * 70)

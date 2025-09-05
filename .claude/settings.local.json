@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(dir \"C:\\Users\\1\\Documents\\GitHub\\MarketingPythonScript\\Excel files\")",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Read(/C:\\Users\\1\\Documents\\GitHub\\MarketingPythonScript/**)",
+      "Read(/C:\\Users\\1\\Documents\\GitHub\\MarketingPythonScript\\regions\\roanoke_county_va/**)",
+      "Read(/C:\\Users\\1\\Documents\\GitHub\\MarketingPythonScript/**)"
     ],
     "deny": [],
     "ask": []

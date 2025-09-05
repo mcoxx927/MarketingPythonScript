@@ -74,6 +74,7 @@ Create `regions/new_region_name/config.json`:
 {
   "region_name": "Your City Name, ST",
   "region_code": "CODE", 
+  "fips_code": "12345",
   "region_input_date1": "2009-01-01",
   "region_input_date2": "2019-01-01",
   "region_input_amount1": 75000,
@@ -85,6 +86,7 @@ Create `regions/new_region_name/config.json`:
 ```
 
 **Configuration Parameters:**
+- `fips_code`: FIPS code for the region - **CRITICAL**: Must match FIPS column in all Excel files
 - `region_input_date1`: ABS1 cutoff - properties sold before this date get high priority
 - `region_input_date2`: BUY1/BUY2 cutoff - recent buyers sold after this date  
 - `region_input_amount1`: Low amount threshold for TRS1, OON1 classifications
@@ -205,7 +207,12 @@ python monthly_processing_v2.py --all-regions
 ## 🔍 Output Files
 
 ### Main Output File
-**`main_region_enhanced_YYYYMMDD.xlsx`** - Complete enhanced dataset containing:
+**`{region_code}_main_region_enhanced_YYYYMMDD.xlsx`** - Complete enhanced dataset containing:
+
+**Example filenames:**
+- `roak_main_region_enhanced_20250903.xlsx` (Roanoke)
+- `vbch_main_region_enhanced_20250903.xlsx` (Virginia Beach)
+- `rich_main_region_enhanced_20250903.xlsx` (Richmond)
 
 **Original Columns:** All columns from your source data  
 **Added Columns:**
@@ -219,7 +226,13 @@ python monthly_processing_v2.py --all-regions
 - Enhanced: `Liens-ABS1`, `Tax-Landlord-OWN20`, `PreForeclosure-BUY2`
 
 ### Processing Log
-**`processing_YYYYMMDD_HHMM.log`** - Detailed processing log with:
+**`{region_code}_processing_YYYYMMDD_HHMM.log`** - Detailed processing log with:
+
+**Example filenames:**
+- `roak_processing_20250903_1430.log`
+- `vbch_processing_20250903_1430.log`
+
+**Log Contents:**
 - Configuration loaded
 - Files processed
 - Error messages
@@ -233,6 +246,12 @@ python monthly_processing_v2.py --all-regions
 - Ensure `config.json` exists and is valid JSON
 - Verify at least one `.xlsx` file exists in region folder
 - Check file permissions
+
+**"FIPS validation failed"**
+- **CRITICAL ERROR**: Excel files contain wrong region data
+- Check that all Excel files have FIPS column
+- Verify FIPS codes in files match the config.json setting
+- This prevents processing wrong region data by mistake
 
 **"No Excel files found"**  
 - Verify files have `.xlsx` extension
@@ -263,6 +282,7 @@ logging.basicConfig(level=logging.DEBUG)
 ## 📊 Data Quality & Validation
 
 ### Automatic Validations
+- **FIPS Code Validation**: Ensures all files match the expected region FIPS code - **PREVENTS REGION MIX-UPS**
 - **Date parsing**: Blank dates treated as "very old" for high priority
 - **Amount parsing**: Handles currency formatting and blank values  
 - **Address normalization**: Standardizes addresses for matching

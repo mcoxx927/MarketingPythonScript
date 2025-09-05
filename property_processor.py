@@ -153,9 +153,9 @@ class PropertyPriorityScorer:
     
     IMPORTANT DATE CRITERIA (from SQL Region table):
     - region_input_date1: Used for ABS1 (Absentee List 3) - properties with old sale dates
-    - region_input_date2: Used for BUY1/BUY2 - properties with recent high-value buyers  
+    - region_input_date2: Used for BUY1/BUY2 - properties with recent buyers  
     - region_input_amount1: Low sale amount threshold (TRS1, OON1)
-    - region_input_amount2: High sale amount threshold (BUY1, BUY2)
+    - region_input_amount2: High sale amount threshold (not used for BUY1/BUY2)
     """
     
     def __init__(self, region_input_date1=None, region_input_date2=None, 
@@ -168,14 +168,14 @@ class PropertyPriorityScorer:
             region_input_date1: Cutoff for ABS1 - properties older than this date
             region_input_date2: Cutoff for BUY1/BUY2 - properties newer than this date  
             region_input_amount1: Low amount threshold (typically $75k for Roanoke)
-            region_input_amount2: High amount threshold (typically $200k+ for cash buyers)
+            region_input_amount2: High amount threshold (not used for BUY1/BUY2)
         """
         # Set region-specific dates based on SQL stored procedure defaults
         if region_input_date1 is None:
             # ABS1 looks for properties sold before this date (15 years ago typical)
             region_input_date1 = datetime.now() - timedelta(days=365*15)  
         if region_input_date2 is None:
-            # BUY1/BUY2 look for properties sold after this date (5 years ago typical)  
+            # BUY1/BUY2 look for properties sold after this date (recent buyers)  
             region_input_date2 = datetime.now() - timedelta(days=365*5)   
             
         self.region_input_date1 = region_input_date1
@@ -187,19 +187,19 @@ class PropertyPriorityScorer:
         logger.info(f"  ABS1 date cutoff (old sales): {region_input_date1.strftime('%Y-%m-%d')}")
         logger.info(f"  BUY1/BUY2 date cutoff (recent): {region_input_date2.strftime('%Y-%m-%d')}")
         logger.info(f"  Low amount threshold: ${region_input_amount1:,}")
-        logger.info(f"  High amount threshold: ${region_input_amount2:,}")
+        logger.info(f"  BUY1: Recent cash buyers OR recent absentee buyers")
         
         # Priority definitions from SQL
         self.priorities = {
             1: "OIN1 - Owner-Occupant List 1",      # Owner occupied + grantor match
             2: "OWN1 - Owner-Occupant List 3",      # Owner occupied + old sale date
             3: "OON1 - Owner-Occupant List 4",      # Owner occupied + low sale amount 
-            4: "BUY2 - Owner-Occupant List 5",      # Owner occupied + recent high buyer
+            4: "BUY2 - Owner-Occupant List 5",      # Owner occupied + recent non-cash buyer
             5: "TRS2 - Trust",                      # Trusts
             6: "INH1 - Absentee List 1",           # Absentee + grantor match
             7: "ABS1 - Absentee List 3",           # Absentee + old sale date
             8: "TRS1 - Absentee List 4",           # Absentee + low sale amount
-            9: "BUY1 - Absentee List 5",           # Absentee + recent high buyer
+            9: "BUY1 - Investor Buyers",           # Recent cash buyers OR recent absentee buyers
             10: "CHURCH - Church",                  # Churches
             11: "DEFAULT - Default",                # Default/unclassified
             13: "OWN20 - Owner-Occupant List 20"    # Very old owner occupied (20+ years)
@@ -263,9 +263,12 @@ class PropertyPriorityScorer:
         if sale_amount and sale_amount <= self.region_input_amount1:
             return 3
             
-        # BUY2: Recent high value buyers = Priority 4
-        if (sale_amount and sale_amount >= self.region_input_amount2 and
-            sale_date >= self.region_input_date2):
+        # BUY1: Owner-occupied recent cash buyers = Priority 9  
+        if (sale_date >= self.region_input_date2 and self._is_cash_buyer(row)):
+            return 9
+            
+        # BUY2: Owner-occupied recent non-cash buyers = Priority 4
+        if sale_date >= self.region_input_date2:
             return 4
             
         return 11  # Default
@@ -289,9 +292,8 @@ class PropertyPriorityScorer:
         if sale_amount and sale_amount <= self.region_input_amount1:
             return 8
             
-        # BUY1: Absentee recent high value buyers = Priority 9
-        if (sale_amount and sale_amount >= self.region_input_amount2 and
-            sale_date >= self.region_input_date2):
+        # BUY1: Absentee recent buyers = Priority 9
+        if sale_date >= self.region_input_date2:
             return 9
             
         return 11  # Default
@@ -326,6 +328,19 @@ class PropertyPriorityScorer:
         except (ValueError, TypeError):
             logger.debug(f"Could not parse date: {date_val}, treating as very old")
             return datetime(1850, 1, 1)
+    
+    def _is_cash_buyer(self, row: pd.Series) -> bool:
+        """
+        Check if property indicates a cash buyer transaction.
+        
+        Returns True if Last Cash Buyer field indicates cash purchase.
+        """
+        # Check Last Cash Buyer field only
+        last_cash_buyer = row.get('Last Cash Buyer', '')
+        if pd.notna(last_cash_buyer) and str(last_cash_buyer).lower() in ['true', 'yes', '1', 'y']:
+            return True
+            
+        return False
     
     def _parse_amount(self, amount_val) -> Optional[float]:
         """

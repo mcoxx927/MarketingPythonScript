@@ -1,6 +1,7 @@
 {
   "region_name": "Newport News, VA",
   "region_code": "NNVA",
+  "fips_code": "51700",
   "region_input_date1": "2009-01-01",
   "region_input_date2": "2019-01-01",
   "region_input_amount1": 110000,

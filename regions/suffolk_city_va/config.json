@@ -1,6 +1,7 @@
 {
   "region_name": "Suffolk City, VA",
   "region_code": "SUFF",
+  "fips_code": "51800",
   "region_input_date1": "2010-01-01",
   "region_input_date2": "2020-01-01", 
   "region_input_amount1": 140000,

@@ -1,6 +1,7 @@
 {
   "region_name": "Portsmouth City, VA", 
   "region_code": "PORT",
+  "fips_code": "51740",
   "region_input_date1": "2009-01-01",
   "region_input_date2": "2019-01-01",
   "region_input_amount1": 85000,

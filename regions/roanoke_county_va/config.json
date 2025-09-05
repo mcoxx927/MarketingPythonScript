@@ -1,6 +1,7 @@
 {
   "region_name": "Roanoke County, VA",
   "region_code": "ROACo",
+  "fips_code": "51161",
   "region_input_date1": "2017-09-03",
   "region_input_date2": "2024-09-03", 
   "region_input_amount1": 40000,
