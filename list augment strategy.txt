@@ -1,0 +1,16 @@
+list augment with data we already have:
+
+vacant flag = yes make it a niche list
+lien type, bk date, pre foreclosure
+
+skip trace data
+
+our mail house have any ideas?
+
+incarcerated
+
+data scrapper from the courthouse and tax collectors
+
+commercial
+
+default with niche still has 11 as priorityid...not sure priorityid purpose but its the same as a regular default.
