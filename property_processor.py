@@ -592,11 +592,24 @@ class PropertyProcessor:
                 enhanced_codes.append(enhanced_code)
                 enhanced_names.append(enhanced_name)
                 
-            except Exception as e:
-                logger.warning(f"Error processing record {idx}: {e}. Using defaults.")
+            except (KeyError, AttributeError) as data_error:
+                logger.error(f"Data structure error in record {idx}: {data_error}. Missing required fields.")
                 priorities.append(DEFAULT_PRIORITY_ID)
                 enhanced_codes.append(DEFAULT_PRIORITY_CODE)
-                enhanced_names.append('Default - Error in Processing')
+                enhanced_names.append('Default - Missing Data')
+            except (ValueError, TypeError) as business_error:
+                logger.error(f"Business logic error in record {idx}: {business_error}. Invalid data values.")
+                priorities.append(DEFAULT_PRIORITY_ID)
+                enhanced_codes.append(DEFAULT_PRIORITY_CODE)
+                enhanced_names.append('Default - Invalid Data')
+            except Exception as unexpected_error:
+                logger.critical(f"Unexpected error processing record {idx}: {unexpected_error}. This may indicate a system issue.")
+                # Re-raise critical errors that shouldn't be silently handled
+                if "memory" in str(unexpected_error).lower() or "system" in str(unexpected_error).lower():
+                    raise
+                priorities.append(DEFAULT_PRIORITY_ID)
+                enhanced_codes.append(DEFAULT_PRIORITY_CODE)
+                enhanced_names.append('Default - System Error')
         
         # Assign results in bulk
         df['PriorityId'] = priorities

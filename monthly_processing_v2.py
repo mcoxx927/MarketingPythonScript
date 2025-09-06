@@ -77,7 +77,7 @@ def _normalize_address(address_str) -> str:
     addr = addr.replace(',', ' ').strip()
     
     # Collapse multiple spaces
-    addr = re.sub(r'\\s+', ' ', addr)
+    addr = re.sub(r'\s+', ' ', addr)
     
     return addr
 
@@ -155,9 +155,25 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
             '_NormalizedAddress': insert_records['_NormalizedAddress']
         })
         
-        # Concatenate new records to main DataFrame
-        main_df = pd.concat([main_df, new_records], ignore_index=True)
-        inserts_count = len(insert_records)
+        # Concatenate new records to main DataFrame with proper error handling
+        try:
+            # Validate column compatibility before concatenation
+            main_cols = set(main_df.columns)
+            new_cols = set(new_records.columns)
+            if not new_cols.issubset(main_cols):
+                missing_cols = new_cols - main_cols
+                logger.warning(f"New records have columns not in main DataFrame: {missing_cols}")
+            
+            # Perform concatenation with memory and index safety
+            main_df = pd.concat([main_df, new_records], ignore_index=True, sort=False)
+            inserts_count = len(insert_records)
+            
+        except pd.errors.OutOfMemoryError:
+            logger.error(f"Out of memory during concatenation of {len(insert_records)} records")
+            raise MemoryError(f"Insufficient memory to add {len(insert_records)} niche records")
+        except Exception as concat_error:
+            logger.error(f"Failed to concatenate niche records: {concat_error}")
+            raise ValueError(f"Data structure mismatch during concatenation: {concat_error}")
     
     # Clean up temporary column from both DataFrames
     if '_NormalizedAddress' in main_df.columns:
@@ -296,13 +312,28 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager) ->
                     try:
                         niche_df = pd.read_excel(niche_file, dtype={'FIPS': 'category'})
                         
-                        # Optimize memory usage for niche files, but protect key columns
+                        # Optimize memory usage for niche files with safety limits
                         protected_columns = {'Owner 1 Last Name', 'Owner 1 First Name', 'Address', 'Mailing Address'}
                         string_columns = niche_df.select_dtypes(include=['object']).columns
+                        
+                        # Apply safe dtype optimization with limits
                         for col in string_columns:
-                            if (col not in protected_columns and 
-                                niche_df[col].nunique() / len(niche_df) < 0.5):
-                                niche_df[col] = niche_df[col].astype('category')
+                            if col not in protected_columns:
+                                try:
+                                    unique_ratio = niche_df[col].nunique() / len(niche_df)
+                                    max_categories = niche_df[col].nunique()
+                                    
+                                    # Safety checks before category conversion
+                                    if (unique_ratio < 0.5 and 
+                                        max_categories < 10000 and  # Prevent excessive category creation
+                                        niche_df[col].memory_usage(deep=True) > 1024 * 1024):  # Only optimize if >1MB
+                                        
+                                        niche_df[col] = niche_df[col].astype('category')
+                                        logger.debug(f"Converted column '{col}' to category (unique_ratio={unique_ratio:.3f}, categories={max_categories})")
+                                    
+                                except Exception as dtype_error:
+                                    logger.warning(f"Failed to optimize column '{col}': {dtype_error}")
+                                    # Continue without optimization for this column
                                 
                     except Exception as read_error:
                         print(f"   ERROR: Cannot read {niche_file.name}: {read_error}")
