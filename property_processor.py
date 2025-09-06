@@ -10,12 +10,26 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
+from pathlib import Path
 import re
 import logging
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Constants for processing
+DEFAULT_PRIORITY_ID = 11
+DEFAULT_PRIORITY_CODE = 'DEFAULT'
+NICHE_ONLY_PRIORITY_ID = 99
+VERY_OLD_DATE = datetime(1850, 1, 1)
+PROGRESS_LOG_INTERVAL = 5000
+
+# Data validation constants
+REQUIRED_COLUMNS = ['Owner 1 Last Name', 'Owner 1 First Name', 'Address']
+RECOMMENDED_COLUMNS = ['Last Sale Date', 'Last Sale Amount', 'Mailing Address', 'FIPS']
+MAX_REASONABLE_SALE_AMOUNT = 50_000_000  # $50M seems reasonable as upper bound
+MIN_REASONABLE_SALE_DATE = datetime(1800, 1, 1)  # Sanity check for very old dates
 
 @dataclass
 class PropertyClassification:
@@ -29,8 +43,8 @@ class PropertyClassification:
 @dataclass  
 class PropertyPriority:
     """Holds priority assignment results"""
-    priority_id: int = 11  # Default priority
-    priority_code: str = "DEFAULT"
+    priority_id: int = DEFAULT_PRIORITY_ID
+    priority_code: str = DEFAULT_PRIORITY_CODE
     priority_name: str = "Default"
 
 class PropertyClassifier:
@@ -183,11 +197,11 @@ class PropertyPriorityScorer:
         self.region_input_amount1 = region_input_amount1
         self.region_input_amount2 = region_input_amount2
         
-        logger.info(f"Priority Scorer Configuration:")
-        logger.info(f"  ABS1 date cutoff (old sales): {region_input_date1.strftime('%Y-%m-%d')}")
-        logger.info(f"  BUY1/BUY2 date cutoff (recent): {region_input_date2.strftime('%Y-%m-%d')}")
-        logger.info(f"  Low amount threshold: ${region_input_amount1:,}")
-        logger.info(f"  BUY1: Recent cash buyers OR recent absentee buyers")
+        logger.info(f"[CONFIG] Priority Scorer Configuration:")
+        logger.info(f"[CONFIG]   ABS1 date cutoff (old sales): {region_input_date1.strftime('%Y-%m-%d')}")
+        logger.info(f"[CONFIG]   BUY1/BUY2 date cutoff (recent): {region_input_date2.strftime('%Y-%m-%d')}")
+        logger.info(f"[CONFIG]   Low amount threshold: ${region_input_amount1:,}")
+        logger.info(f"[CONFIG]   BUY1: Recent cash buyers OR recent absentee buyers")
         
         # Priority definitions from SQL
         self.priorities = {
@@ -309,25 +323,25 @@ class PropertyPriorityScorer:
         """
         if pd.isna(date_val) or date_val == '' or date_val is None:
             # Return very old sentinel date for blank values
-            return datetime(1850, 1, 1)
+            return VERY_OLD_DATE
             
         try:
             parsed_date = pd.to_datetime(date_val)
             
             # Handle SQL sentinel dates (1900-01-01) as very old dates
             if parsed_date.year <= 1900:
-                return datetime(1850, 1, 1)
+                return VERY_OLD_DATE
                 
             # Sanity check - future dates are probably errors
             if parsed_date > datetime.now():
                 logger.debug(f"Future date detected: {parsed_date}, treating as very old")
-                return datetime(1850, 1, 1)
+                return VERY_OLD_DATE
                 
             return parsed_date
             
         except (ValueError, TypeError):
             logger.debug(f"Could not parse date: {date_val}, treating as very old")
-            return datetime(1850, 1, 1)
+            return VERY_OLD_DATE
     
     def _is_cash_buyer(self, row: pd.Series) -> bool:
         """
@@ -369,6 +383,47 @@ class PropertyPriorityScorer:
             logger.debug(f"Could not parse amount: {amount_val}")
             return None
 
+    def _enhance_priority_with_main_file_fields(self, row: pd.Series, priority_code: str) -> str:
+        """
+        Enhance priority code with main file field indicators (Vacant, Lien, Bankruptcy, PreForeclosure).
+        Similar to niche list processing but for fields within the main file.
+        
+        Args:
+            row: Property data row
+            priority_code: Original priority code (e.g., "DEFAULT", "OWN1", "ABS1")
+            
+        Returns:
+            Enhanced priority code with prefixes (e.g., "Vacant-DEFAULT", "Lien-OWN1")
+        """
+        enhancements = []
+        
+        # Check Vacant field
+        vacant = row.get('Vacant', '')
+        if pd.notna(vacant) and str(vacant).lower() in ['yes', 'true', '1', 'y']:
+            enhancements.append('Vacant')
+        
+        # Check Lien Type field  
+        lien_type = row.get('Lien Type', '')
+        if pd.notna(lien_type) and str(lien_type).strip() != '':
+            enhancements.append('Lien')
+        
+        # Check BK Date field
+        bk_date = row.get('BK Date', '')
+        if pd.notna(bk_date) and str(bk_date).strip() != '':
+            enhancements.append('Bankruptcy')
+        
+        # Check Pre-FC Recording Date field
+        prefc_date = row.get('Pre-FC Recording Date', '')
+        if pd.notna(prefc_date) and str(prefc_date).strip() != '':
+            enhancements.append('PreForeclosure')
+        
+        # Build enhanced priority code with prefixes
+        if enhancements:
+            prefix = '-'.join(enhancements)
+            return f"{prefix}-{priority_code}"
+        
+        return priority_code
+
 class PropertyProcessor:
     """
     Main property processing class that orchestrates the entire pipeline.
@@ -403,11 +458,41 @@ class PropertyProcessor:
         Returns:
             DataFrame with additional columns for classification and priority
         """
-        logger.info(f"Processing file: {file_path}")
+        logger.info(f"[PROCESSING] Starting file: {Path(file_path).name}")
         
-        # Read Excel file
-        df = pd.read_excel(file_path)
-        logger.info(f"Loaded {len(df)} records")
+        try:
+            # Validate file exists and is readable
+            if not Path(file_path).exists():
+                raise FileNotFoundError(f"File not found: {file_path}")
+            
+            # Read Excel file with error handling and memory optimization
+            try:
+                # Use dtype optimization to reduce memory usage
+                df = pd.read_excel(file_path, dtype={'FIPS': 'category'})
+                
+                # Convert only specific columns to category to avoid assignment issues
+                # Skip columns we might modify later
+                protected_columns = {'Owner 1 Last Name', 'Owner 1 First Name', 'Address', 'Mailing Address'}
+                string_columns = df.select_dtypes(include=['object']).columns
+                for col in string_columns:
+                    if (col not in protected_columns and 
+                        df[col].nunique() / len(df) < 0.5):  # Less than 50% unique values
+                        df[col] = df[col].astype('category')
+                        
+            except Exception as e:
+                raise ValueError(f"Failed to read Excel file {file_path}: {e}")
+            
+            if df.empty:
+                raise ValueError(f"Excel file is empty: {file_path}")
+                
+            logger.info(f"[DATA] Loaded {len(df):,} records from {Path(file_path).name}")
+            
+            # Validate required columns
+            self._validate_dataframe_structure(df, file_path)
+        
+        except Exception as e:
+            logger.error(f"Error loading file {file_path}: {e}")
+            raise
         
         # Create owner name from first and last name
         df['OwnerName'] = (df['Owner 1 Last Name'].fillna('') + ' ' + 
@@ -428,48 +513,108 @@ class PropertyProcessor:
         df['ParsedSaleAmount'] = None
         df['DateParseIssues'] = ''
         
-        # Process each row
+        try:
+            # Vectorized processing for better performance
+            logger.info("Starting vectorized property classification...")
+            
+            # Vectorized classification with error handling
+            df['IsTrust'] = df['OwnerName'].apply(lambda x: self.classifier._is_trust(str(x).lower()) if pd.notna(x) else False)
+            df['IsChurch'] = df.apply(lambda row: self.classifier._is_church(str(row['OwnerName']).lower()) if pd.notna(row['OwnerName']) and not row['IsTrust'] else False, axis=1)
+            df['IsBusiness'] = df.apply(lambda row: self.classifier._is_business(str(row['OwnerName']).lower(), row['IsTrust']) if pd.notna(row['OwnerName']) and not row['IsChurch'] else False, axis=1)
+        except Exception as e:
+            logger.error(f"Error in property classification: {e}")
+            # Set default values and continue
+            df['IsTrust'] = False
+            df['IsChurch'] = False  
+            df['IsBusiness'] = False
+        
+        # Vectorized owner occupancy check
+        df['IsOwnerOccupied'] = df.apply(lambda row: self._check_owner_occupancy(row), axis=1)
+        
+        # Vectorized grantor matching
+        df['OwnerGrantorMatch'] = df.apply(lambda row: self.classifier._check_grantor_match(
+            str(row['OwnerName']).lower() if pd.notna(row['OwnerName']) else '', 
+            row.get('Grantor', '')
+        ), axis=1)
+        
+        try:
+            # Vectorized date/amount parsing
+            logger.info("Parsing dates and amounts...")
+            df['ParsedSaleDate'] = df.get('Last Sale Date', pd.Series()).apply(self.scorer._parse_date) 
+            df['ParsedSaleAmount'] = df.get('Last Sale Amount', pd.Series()).apply(self.scorer._parse_amount)
+        except Exception as e:
+            logger.error(f"Error parsing dates/amounts: {e}")
+            # Set default values
+            df['ParsedSaleDate'] = datetime(1850, 1, 1)
+            df['ParsedSaleAmount'] = None
+        
+        # Track parsing issues
+        df['DateParseIssues'] = ''
+        invalid_date_mask = pd.notna(df['Last Sale Date']) & df['ParsedSaleDate'].isna()
+        invalid_amount_mask = pd.notna(df['Last Sale Amount']) & df['ParsedSaleAmount'].isna()
+        
+        df.loc[invalid_date_mask, 'DateParseIssues'] = 'InvalidDate'
+        df.loc[invalid_amount_mask, 'DateParseIssues'] = df.loc[invalid_amount_mask, 'DateParseIssues'] + ';InvalidAmount'
+        df['DateParseIssues'] = df['DateParseIssues'].str.strip(';')
+        
+        # Vectorized priority scoring
+        logger.info("Calculating priorities...")
+        priorities = []
+        enhanced_codes = []
+        enhanced_names = []
+        
         for idx, row in df.iterrows():
-            if idx % 1000 == 0:  # Progress logging
-                logger.info(f"Processed {idx} records...")
+            try:
+                if idx % PROGRESS_LOG_INTERVAL == 0:  # Less frequent progress logging
+                    logger.info(f"Processed {idx:,} records...")
                 
-            # Classify property
-            classification = self.classifier.classify_property(
-                row['OwnerName'], 
-                row.get('Grantor')  # This column might not exist in Excel
-            )
-            
-            # Determine owner occupancy (simplified logic - compare addresses)
-            classification.is_owner_occupied = self._check_owner_occupancy(row)
-            
-            # Parse and validate dates/amounts with tracking
-            parsed_date = self.scorer._parse_date(row.get('Last Sale Date'))
-            parsed_amount = self.scorer._parse_amount(row.get('Last Sale Amount'))
-            
-            # Track parsing issues for data quality reporting
-            issues = []
-            if pd.notna(row.get('Last Sale Date')) and parsed_date is None:
-                issues.append('InvalidDate')
-            if pd.notna(row.get('Last Sale Amount')) and parsed_amount is None:
-                issues.append('InvalidAmount')
-            
-            # Score priority (using original row data - scorer handles parsing internally)
-            priority = self.scorer.score_property(row, classification)
-            
-            # Update DataFrame
-            df.at[idx, 'IsTrust'] = classification.is_trust
-            df.at[idx, 'IsChurch'] = classification.is_church  
-            df.at[idx, 'IsBusiness'] = classification.is_business
-            df.at[idx, 'IsOwnerOccupied'] = classification.is_owner_occupied
-            df.at[idx, 'OwnerGrantorMatch'] = classification.owner_grantor_match
-            df.at[idx, 'PriorityId'] = priority.priority_id
-            df.at[idx, 'PriorityCode'] = priority.priority_code
-            df.at[idx, 'PriorityName'] = priority.priority_name
-            
-            # Update parsing tracking columns
-            df.at[idx, 'ParsedSaleDate'] = parsed_date
-            df.at[idx, 'ParsedSaleAmount'] = parsed_amount
-            df.at[idx, 'DateParseIssues'] = ';'.join(issues)
+                # Create classification object from vectorized results
+                classification = PropertyClassification(
+                    is_trust=row.get('IsTrust', False),
+                    is_church=row.get('IsChurch', False), 
+                    is_business=row.get('IsBusiness', False),
+                    is_owner_occupied=row.get('IsOwnerOccupied', False),
+                    owner_grantor_match=row.get('OwnerGrantorMatch', False)
+                )
+                
+                # Score priority
+                priority = self.scorer.score_property(row, classification)
+                
+                # Enhance priority code
+                enhanced_code = self.scorer._enhance_priority_with_main_file_fields(row, priority.priority_code)
+                enhanced_name = priority.priority_name
+                
+                if enhanced_code != priority.priority_code:
+                    prefix = enhanced_code.replace(f"-{priority.priority_code}", "")
+                    enhanced_name = f"{prefix} Enhanced - {priority.priority_name}"
+                
+                priorities.append(priority.priority_id)
+                enhanced_codes.append(enhanced_code)
+                enhanced_names.append(enhanced_name)
+                
+            except (KeyError, AttributeError) as data_error:
+                logger.error(f"Data structure error in record {idx}: {data_error}. Missing required fields.")
+                priorities.append(DEFAULT_PRIORITY_ID)
+                enhanced_codes.append(DEFAULT_PRIORITY_CODE)
+                enhanced_names.append('Default - Missing Data')
+            except (ValueError, TypeError) as business_error:
+                logger.error(f"Business logic error in record {idx}: {business_error}. Invalid data values.")
+                priorities.append(DEFAULT_PRIORITY_ID)
+                enhanced_codes.append(DEFAULT_PRIORITY_CODE)
+                enhanced_names.append('Default - Invalid Data')
+            except Exception as unexpected_error:
+                logger.critical(f"Unexpected error processing record {idx}: {unexpected_error}. This may indicate a system issue.")
+                # Re-raise critical errors that shouldn't be silently handled
+                if "memory" in str(unexpected_error).lower() or "system" in str(unexpected_error).lower():
+                    raise
+                priorities.append(DEFAULT_PRIORITY_ID)
+                enhanced_codes.append(DEFAULT_PRIORITY_CODE)
+                enhanced_names.append('Default - System Error')
+        
+        # Assign results in bulk
+        df['PriorityId'] = priorities
+        df['PriorityCode'] = enhanced_codes
+        df['PriorityName'] = enhanced_names
         
         # Log data quality statistics
         parsing_issues = df['DateParseIssues'].str.len() > 0
@@ -486,8 +631,57 @@ class PropertyProcessor:
             if amount_issues > 0:
                 logger.warning(f"  Invalid amounts: {amount_issues} records")
         
-        logger.info("Processing complete!")
+        # Report memory usage
+        memory_usage = df.memory_usage(deep=True).sum() / 1024 / 1024  # MB
+        logger.info(f"Processing complete! Final DataFrame memory usage: {memory_usage:.1f} MB")
+        
         return df
+    
+    def _validate_dataframe_structure(self, df: pd.DataFrame, file_path: str):
+        """Validate DataFrame structure and data quality"""
+        # Check required columns
+        missing_required = [col for col in REQUIRED_COLUMNS if col not in df.columns]
+        if missing_required:
+            raise ValueError(f"Missing required columns in {file_path}: {missing_required}")
+        
+        # Check recommended columns
+        missing_recommended = [col for col in RECOMMENDED_COLUMNS if col not in df.columns]
+        if missing_recommended:
+            logger.warning(f"Missing recommended columns in {file_path}: {missing_recommended}")
+        
+        # Validate data quality
+        self._validate_data_quality(df, file_path)
+    
+    def _validate_data_quality(self, df: pd.DataFrame, file_path: str):
+        """Perform data quality checks"""
+        total_records = len(df)
+        
+        # Check for completely empty owner names
+        empty_owners = df['Owner 1 Last Name'].isna() & df['Owner 1 First Name'].isna()
+        if empty_owners.any():
+            count = empty_owners.sum()
+            logger.warning(f"Found {count} records ({count/total_records*100:.1f}%) with no owner name in {file_path}")
+        
+        # Check for empty addresses
+        if 'Address' in df.columns:
+            empty_addresses = df['Address'].isna() | (df['Address'].astype(str).str.strip() == '')
+            if empty_addresses.any():
+                count = empty_addresses.sum()
+                logger.warning(f"Found {count} records ({count/total_records*100:.1f}%) with empty addresses in {file_path}")
+        
+        # Check sale amounts for unrealistic values
+        if 'Last Sale Amount' in df.columns:
+            amounts = pd.to_numeric(df['Last Sale Amount'], errors='coerce')
+            unrealistic_high = amounts > MAX_REASONABLE_SALE_AMOUNT
+            unrealistic_negative = amounts < 0
+            
+            if unrealistic_high.any():
+                count = unrealistic_high.sum()
+                logger.warning(f"Found {count} records with sale amounts > ${MAX_REASONABLE_SALE_AMOUNT:,} in {file_path}")
+            
+            if unrealistic_negative.any():
+                count = unrealistic_negative.sum()
+                logger.warning(f"Found {count} records with negative sale amounts in {file_path}")
     
     def _check_owner_occupancy(self, row: pd.Series) -> bool:
         """

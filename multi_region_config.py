@@ -72,12 +72,35 @@ class MultiRegionConfigManager:
         """Load configuration for a specific region"""
         config_file = Path(region_path) / "config.json"
         
-        with open(config_file, 'r') as f:
-            data = json.load(f)
+        try:
+            with open(config_file, 'r') as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in config file {config_file}: {e}")
+        except Exception as e:
+            raise IOError(f"Cannot read config file {config_file}: {e}")
         
-        # Parse dates
-        date1 = datetime.strptime(data['region_input_date1'], '%Y-%m-%d')
-        date2 = datetime.strptime(data['region_input_date2'], '%Y-%m-%d')
+        # Validate required fields
+        required_fields = ['region_name', 'region_code', 'fips_code', 
+                          'region_input_date1', 'region_input_date2',
+                          'region_input_amount1', 'region_input_amount2']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            raise ValueError(f"Missing required fields in {config_file}: {missing_fields}")
+        
+        # Parse dates with error handling
+        try:
+            date1 = datetime.strptime(data['region_input_date1'], '%Y-%m-%d')
+            date2 = datetime.strptime(data['region_input_date2'], '%Y-%m-%d')
+        except ValueError as e:
+            raise ValueError(f"Invalid date format in {config_file}: {e}")
+        
+        # Validate amounts
+        try:
+            amount1 = float(data['region_input_amount1'])
+            amount2 = float(data['region_input_amount2'])
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid amount values in {config_file}: {e}")
         
         return RegionConfig(
             region_name=data['region_name'],
@@ -85,8 +108,8 @@ class MultiRegionConfigManager:
             fips_code=data['fips_code'],
             region_input_date1=date1,
             region_input_date2=date2,
-            region_input_amount1=float(data['region_input_amount1']),
-            region_input_amount2=float(data['region_input_amount2']),
+            region_input_amount1=amount1,
+            region_input_amount2=amount2,
             market_type=data.get('market_type', 'Unknown'),
             description=data.get('description', ''),
             notes=data.get('notes', '')
@@ -175,8 +198,20 @@ class MultiRegionConfigManager:
         
         for excel_file in excel_files:
             try:
+                # Check file accessibility first
+                if not excel_file.exists() or excel_file.stat().st_size == 0:
+                    logger.warning(f"Skipping empty or missing file: {excel_file.name}")
+                    continue
+                
                 # Read just the first few rows to check FIPS
-                df_sample = pd.read_excel(excel_file, nrows=10)
+                try:
+                    df_sample = pd.read_excel(excel_file, nrows=10)
+                except Exception as read_error:
+                    logger.error(f"Cannot read Excel file {excel_file.name}: {read_error}")
+                    validation_results['files_invalid'].append(f"{excel_file.name} (read error: {read_error})")
+                    validation_results['all_valid'] = False
+                    continue
+                
                 validation_results['files_checked'] += 1
                 
                 if 'FIPS' not in df_sample.columns:
@@ -186,26 +221,31 @@ class MultiRegionConfigManager:
                 
                 # Check if FIPS values match expected
                 # Normalize both values to handle number vs string comparison
-                file_fips_codes = df_sample['FIPS'].dropna().astype(str).str.strip().unique()
-                expected_fips = str(config.fips_code).strip()
-                
-                # Check if any FIPS codes don't match expected
-                mismatched_fips = [fips for fips in file_fips_codes if fips != expected_fips]
-                
-                if mismatched_fips:
-                    validation_results['fips_mismatches'].append({
-                        'file': excel_file.name,
-                        'expected': config.fips_code,
-                        'found': list(file_fips_codes)
-                    })
-                    validation_results['files_invalid'].append(excel_file.name)
+                try:
+                    file_fips_codes = df_sample['FIPS'].dropna().astype(str).str.strip().unique()
+                    expected_fips = str(config.fips_code).strip()
+                    
+                    # Check if any FIPS codes don't match expected
+                    mismatched_fips = [fips for fips in file_fips_codes if fips != expected_fips]
+                    
+                    if mismatched_fips:
+                        validation_results['fips_mismatches'].append({
+                            'file': excel_file.name,
+                            'expected': config.fips_code,
+                            'found': list(file_fips_codes)
+                        })
+                        validation_results['files_invalid'].append(excel_file.name)
+                        validation_results['all_valid'] = False
+                    else:
+                        validation_results['files_valid'] += 1
+                except Exception as fips_error:
+                    logger.error(f"Error processing FIPS data in {excel_file.name}: {fips_error}")
+                    validation_results['files_invalid'].append(f"{excel_file.name} (FIPS processing error)")
                     validation_results['all_valid'] = False
-                else:
-                    validation_results['files_valid'] += 1
                     
             except Exception as e:
-                logger.error(f"Error validating FIPS in {excel_file.name}: {e}")
-                validation_results['files_invalid'].append(f"{excel_file.name} (read error)")
+                logger.error(f"Unexpected error validating {excel_file.name}: {e}")
+                validation_results['files_invalid'].append(f"{excel_file.name} (unexpected error)")
                 validation_results['all_valid'] = False
         
         return validation_results
