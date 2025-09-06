@@ -76,8 +76,8 @@ class PropertyClassifier:
         'real', 'holding', 'company', ' inc ', ' co ', ' tc ',
         ' bank ', 'proprietor', 'propert', 'foundation', 'commonwealth',
         'clinic', ' office', 'limit', ' ltd', ' health', ' llp',
-        ' assoc', ' corp', 'Virginia', 'North Carolina', 'Enterprises',
-        'Attorney', 'Credit Union', 'Incorporated', 'Medical', 'Center'
+        ' assoc', ' corp', 'virginia', 'north carolina', 'enterprises',
+        'attorney', 'credit union', 'incorporated', 'medical', 'center'
     ]
     
     # Business ending patterns
@@ -100,22 +100,184 @@ class PropertyClassifier:
         owner_name = str(owner_name).lower()
         classification = PropertyClassification()
         
-        # Check for trust
-        classification.is_trust = self._is_trust(owner_name)
+        # Skip classification for simple personal names to prevent over-matching
+        # e.g., "church barbara", "trussell janet", "upchurch david"
+        if self._is_likely_personal_name(owner_name):
+            # Only check grantor match for personal names
+            if grantor_name:
+                classification.owner_grantor_match = self._check_grantor_match(owner_name, grantor_name)
+            return classification
         
-        # Check for church (only if not a trust)
-        if not classification.is_trust:
-            classification.is_church = self._is_church(owner_name)
-        
-        # Check for business (only if not a church)
-        if not classification.is_church:
-            classification.is_business = self._is_business(owner_name, classification.is_trust)
+        # Use priority-based classification to prevent multiple entity type matches
+        classification = self._classify_with_priority(owner_name, classification)
             
         # Check grantor match if provided
         if grantor_name:
             classification.owner_grantor_match = self._check_grantor_match(owner_name, grantor_name)
             
         return classification
+    
+    def _is_likely_personal_name(self, owner_name: str) -> bool:
+        """
+        Check if owner name appears to be a simple personal name (Firstname Lastname).
+        This prevents over-matching surnames like 'Church', 'Trussell' as business entities.
+        Now more conservative - only blocks obvious personal names.
+        """
+        # Clean up the name
+        name_cleaned = owner_name.strip()
+        if not name_cleaned:
+            return False
+            
+        # Split into words and filter out empty strings
+        words = [word for word in name_cleaned.split() if word.strip()]
+        
+        # Only consider exactly 2 words for personal name detection
+        if len(words) != 2:
+            return False
+        
+        name_lower = name_cleaned.lower()
+        
+        # Strong business entity indicators - never classify as personal
+        strong_business_indicators = ['llc', 'inc', 'corp', 'ltd', 'company', 'group', 
+                                    'holdings', 'properties', 'ventures', 'authority', 
+                                    'foundation', 'association', 'partnership', 'enterprises',
+                                    'center', 'medical', 'hospital', 'clinic', 'services']
+        
+        if any(indicator in name_lower for indicator in strong_business_indicators):
+            return False
+            
+        # Trust/Church entity phrases - never classify as personal
+        entity_phrases = ['family trust', 'living trust', 'revocable trust', 'estate of',
+                        'baptist church', 'methodist church', 'catholic church', 'first church', 
+                        'church of', 'ministry of', 'diocese of']
+        
+        if any(phrase in name_lower for phrase in entity_phrases):
+            return False
+        
+        # Business descriptive words - likely business entities
+        business_descriptors = ['construction', 'development', 'management', 'consulting', 
+                              'solutions', 'systems', 'technologies', 'industries', 'capital',
+                              'investments', 'financial', 'insurance', 'real estate']
+        
+        if any(descriptor in name_lower for descriptor in business_descriptors):
+            return False
+            
+        # Check if this appears to be an address rather than a person/entity name
+        first_word, second_word = words[0].lower(), words[1].lower()
+        
+        # Address indicators - these should NOT be classified as personal names or entities
+        address_suffixes = ['street', 'road', 'avenue', 'lane', 'drive', 'court', 'place',
+                          'way', 'circle', 'boulevard', 'parkway', 'terrace', 'trail']
+        
+        if second_word in address_suffixes or first_word in address_suffixes:
+            return False  # Not a personal name, and won't be classified as entity either
+        
+        # Known surname patterns that trigger keyword matches - these ARE personal names
+        problematic_surnames = ['church', 'trussell', 'trussler', 'upchurch', 'churchwell']
+        
+        if second_word in problematic_surnames or first_word in problematic_surnames:
+            return True
+            
+        # Default: if it's 2 words with no business indicators and no address indicators, likely personal
+        return True
+    
+    def _classify_with_priority(self, owner_name: str, classification: PropertyClassification) -> PropertyClassification:
+        """
+        Classify entity using priority system to prevent multiple entity type matches.
+        Priority order: Business Entity Suffixes > Trust Entities > Church Entities > Partial Matches
+        """
+        
+        # PRIORITY 1: Strong Business Entity Indicators (highest priority)
+        if self._has_strong_business_indicators(owner_name):
+            classification.is_business = True
+            return classification
+        
+        # PRIORITY 2: Strong Trust Entity Indicators  
+        if self._has_strong_trust_indicators(owner_name):
+            classification.is_trust = True
+            return classification
+            
+        # PRIORITY 3: Strong Church Entity Indicators
+        if self._has_strong_church_indicators(owner_name):
+            classification.is_church = True
+            return classification
+        
+        # PRIORITY 4: Weak/Partial Matches (lowest priority)
+        # Only apply if no strong indicators found
+        
+        # Check for weak trust indicators
+        if self._has_weak_trust_indicators(owner_name):
+            classification.is_trust = True
+            return classification
+            
+        # Check for weak church indicators
+        if self._has_weak_church_indicators(owner_name):
+            classification.is_church = True
+            return classification
+            
+        # Check for weak business indicators
+        if self._has_weak_business_indicators(owner_name):
+            classification.is_business = True
+            return classification
+            
+        return classification
+    
+    def _has_strong_business_indicators(self, owner_name: str) -> bool:
+        """Check for strong business entity indicators (LLC, INC, CORP, etc.)"""
+        strong_suffixes = ['llc', 'inc', 'corp', 'ltd', 'company', 'enterprises', 
+                          'corporation', 'incorporated', 'limited']
+        
+        # Check for exact business suffixes  
+        for suffix in strong_suffixes:
+            if owner_name.endswith(' ' + suffix) or owner_name.endswith(suffix):
+                return True
+                
+        # Check for strong business entity phrases
+        strong_business_phrases = ['housing authority', 'planning commission', 'city of',
+                                 'county of', 'commonwealth of', 'state of', 'credit union',
+                                 'medical center', 'hospital system', 'school district']
+        
+        return any(phrase in owner_name for phrase in strong_business_phrases)
+    
+    def _has_strong_trust_indicators(self, owner_name: str) -> bool:
+        """Check for strong trust entity indicators"""
+        strong_trust_phrases = ['family trust', 'living trust', 'revocable trust', 
+                              'irrevocable trust', 'testamentary trust', 'estate of',
+                              'trust of', 'trust for']
+        
+        return any(phrase in owner_name for phrase in strong_trust_phrases)
+    
+    def _has_strong_church_indicators(self, owner_name: str) -> bool:
+        """Check for strong church entity indicators"""
+        strong_church_phrases = ['baptist church', 'methodist church', 'catholic church',
+                               'presbyterian church', 'episcopal church', 'lutheran church',
+                               'first church', 'church of', 'diocese of', 'ministry of']
+        
+        return any(phrase in owner_name for phrase in strong_church_phrases)
+    
+    def _has_weak_trust_indicators(self, owner_name: str) -> bool:
+        """Check for weak trust indicators (partial keyword matches)"""
+        # Only match if it seems like a legal context, not an address
+        if any(addr_word in owner_name for addr_word in ['street', 'road', 'avenue', 'lane', 'drive']):
+            return False
+            
+        return any(keyword in owner_name for keyword in self.TRUST_KEYWORDS)
+    
+    def _has_weak_church_indicators(self, owner_name: str) -> bool:
+        """Check for weak church indicators (partial keyword matches)"""
+        # Skip if it appears to be an address or personal name context
+        if any(addr_word in owner_name for addr_word in ['street', 'road', 'avenue', 'lane', 'drive']):
+            return False
+            
+        return any(keyword in owner_name for keyword in self.CHURCH_KEYWORDS)
+    
+    def _has_weak_business_indicators(self, owner_name: str) -> bool:
+        """Check for weak business indicators (partial keyword matches)"""
+        # Skip if it appears to be an address context
+        if any(addr_word in owner_name for addr_word in ['street', 'road', 'avenue', 'lane', 'drive']):
+            return False
+            
+        return any(keyword in owner_name for keyword in self.BUSINESS_KEYWORDS)
     
     def _is_trust(self, owner_name: str) -> bool:
         """Check if owner name indicates a trust"""

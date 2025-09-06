@@ -19,24 +19,34 @@ class TestPropertyClassifier:
         self.classifier = PropertyClassifier()
     
     def test_trust_detection_keywords(self):
-        """Test trust detection with various keyword patterns"""
+        """Test trust detection with priority-based classification"""
         trust_cases = [
-            # Basic trust keywords
-            ("SMITH FAMILY TRUST", True, "Basic trust pattern"),
-            ("LIVING TRUST OF JONES", True, "Living trust pattern"),
-            ("THE BROWN REVOCABLE TRUST", True, "Revocable trust pattern"),
-            ("ESTATE OF WILLIAMS", True, "Estate pattern"),
-            ("JOHN DOE TESTAMENTARY TRUST", True, "Testamentary trust pattern"),
+            # Strong trust indicators (highest priority)
+            ("SMITH FAMILY TRUST", True, "Strong trust phrase"),
+            ("LIVING TRUST OF JONES", True, "Strong trust phrase"),
+            ("THE BROWN REVOCABLE TRUST", True, "Strong trust phrase"),
+            ("ESTATE OF WILLIAMS", True, "Strong trust phrase"),
+            ("TESTAMENTARY TRUST OF DOE", True, "Strong trust phrase"),
             
             # Mixed case and spacing
             ("smith family Trust", True, "Mixed case should work"),
             ("LIVING  TRUST  OF  JONES", True, "Multiple spaces should work"),
             
-            # Edge cases - should NOT match
-            ("TRUSTING FRIEND LLC", False, "Partial match should be rejected"),
-            ("ESTABLISH NEW LLC", False, "Contains 'establish' but not trust"),
+            # Personal names with trust-like surnames (blocked by personal name detection)
+            ("TRUSSELL JANET", False, "Personal name with 'trus' surname"),
+            ("TRUSSLER MYRNA", False, "Personal name with 'trus' surname"),
+            ("PETRUS JOAN", False, "Personal name with 'trus' substring"),
+            
+            # Address contexts (blocked by address detection)
+            ("LIVING ON MAIN STREET", False, "Address context - not entity"),
+            ("LIVING STREET", False, "Street address - not entity"),
+            
+            # Business entities take priority over weak trust matches
+            ("TRUSTWORTHY CONSTRUCTION LLC", False, "LLC overrides partial 'trus' match"),
+            
+            # Edge cases
+            ("ESTABLISH NEW LLC", False, "No trust indicators, LLC makes it business"),
             ("SMITH FAMILY", False, "No trust keywords"),
-            ("LIVING ON MAIN STREET", False, "Living without trust context"),
             
             # Empty/null cases
             ("", False, "Empty string"),
@@ -61,12 +71,13 @@ class TestPropertyClassifier:
             ("CHURCH OF CHRIST", True, "Church ending pattern"),
             ("WORD OF GOD", True, "God ending pattern"),
             
-            # Edge cases - should NOT match (addresses vs entities)
-            ("CHURCHILL AVENUE", False, "Street name containing 'church'"),
-            ("GODWIN STREET", False, "Street name containing 'god'"),
-            ("CHRISTIAN MILLER", False, "Person name with Christian"),
-            ("BAPTIST ROAD", False, "Street name"),
-            ("HOLYCROSS STREET", False, "Street name compound"),
+            # Personal names with church-like surnames (should NOT match due to personal name detection)
+            ("UPCHURCH DAVID", False, "Personal name with church surname"),
+            ("CHURCH BARBARA", False, "Personal name with church surname"),
+            ("CHURCH RANDY", False, "Personal name with church surname"),
+            
+            # Edge cases
+            ("CHRISTIAN MILLER", False, "Person name with Christian - detected as personal"),
             
             # Empty/null cases
             ("", False, "Empty string"),
@@ -78,30 +89,34 @@ class TestPropertyClassifier:
             assert classification.is_church == expected, f"Failed: {description} - '{owner_name}'"
     
     def test_business_entity_detection(self):
-        """Test business entity detection with comprehensive keyword coverage"""
+        """Test business entity detection with priority-based classification"""
         business_cases = [
-            # Basic business entity patterns
-            ("ACME CORPORATION", True, "Corporation pattern"),
-            ("SMITH PROPERTIES LLC", True, "LLC pattern"),
-            ("ROANOKE HOLDINGS INC", True, "Inc pattern"),
-            ("REAL ESTATE PARTNERS", True, "Real estate business"),
-            ("CITY OF ROANOKE", True, "City entity"),
-            ("COMMONWEALTH OF VIRGINIA", True, "Commonwealth entity"),
+            # Strong business indicators (highest priority)
+            ("ACME CORPORATION", True, "Strong business suffix"),
+            ("SMITH PROPERTIES LLC", True, "Strong business suffix"),
+            ("ROANOKE HOLDINGS INC", True, "Strong business suffix"),
+            ("MEDICAL CENTER", True, "Strong business phrase"),
+            ("VIRGINIA HOUSING AUTHORITY", True, "Strong business phrase"),
+            ("CITY OF ROANOKE", True, "Strong business phrase"),
+            ("COMMONWEALTH OF VIRGINIA", True, "Strong business phrase"),
+            ("CREDIT UNION FEDERAL", True, "Strong business phrase"),
             
-            # Business endings
-            ("SMITH & ASSOCIATES", True, "Associates ending"),
-            ("MEDICAL CENTER", True, "Medical center"),
-            ("HOUSING AUTHORITY", True, "Housing authority"),
-            ("PLANNING COMMISSION", True, "Planning commission"),
+            # Business overrides partial matches from other categories
+            ("TRUSTWORTHY CONSTRUCTION LLC", True, "LLC overrides partial 'trus' match"),
+            ("ESTABLISH LLC", True, "LLC suffix makes it business"),
+            ("HOLY CONSTRUCTION COMPANY", True, "Company suffix overrides 'holy' church match"),
             
-            # Edge cases - should NOT match (unless other criteria met)
-            ("INCORPORATE STREET", False, "Street name containing business keyword"),
-            ("DEVELOPING ROAD", False, "Street name with develop keyword"),
-            ("COMPANY STORE LANE", False, "Street name"),
+            # Weak business indicators (only match if no address context)
+            ("ROANOKE PROPERTIES", True, "Weak business keywords, no address context"),
+            ("REAL ESTATE PARTNERS", True, "Business descriptive phrases"),
             
-            # Person names that might have business keywords
-            ("JOHN COMPANY SMITH", False, "Person name with business word"),
-            ("MARY REAL JONES", False, "Person name with 'real'"),
+            # Personal names (blocked by personal name detection)
+            ("JOHN COMPANY", False, "Personal name detected"),
+            ("MARY REAL", False, "Personal name detected"),
+            
+            # Address contexts (blocked by address detection)
+            ("COMPANY STREET", False, "Street address - not entity"),
+            ("REAL ESTATE DRIVE", False, "Address context blocks classification"),
             
             # Empty/null cases
             ("", False, "Empty string"),
@@ -218,6 +233,78 @@ class TestPropertyClassifier:
         assert trust_count > 0, "Should find some trusts"
         assert church_count > 0, "Should find some churches"
         assert business_count > 0, "Should find some businesses"
+    
+    def test_priority_classification_system(self):
+        """Test the new priority-based classification system"""
+        priority_cases = [
+            # Priority 1: Strong business indicators win over everything
+            ("TRUSTWORTHY CONSTRUCTION LLC", False, False, True, "Business suffix overrides trust keyword"),
+            ("HOLY MEDICAL CENTER", False, False, True, "Medical center overrides holy church keyword"),
+            ("CHURCH PROPERTIES INC", False, False, True, "INC overrides church keyword"),
+            
+            # Priority 2: Strong trust indicators  
+            ("SMITH FAMILY TRUST", True, False, False, "Strong trust phrase"),
+            ("LIVING TRUST OF JONES", True, False, False, "Strong trust phrase"),
+            
+            # Priority 3: Strong church indicators
+            ("FIRST BAPTIST CHURCH", False, True, False, "Strong church phrase"),
+            ("CHURCH OF GOD", False, True, False, "Strong church phrase"),
+            
+            # Priority 4: Weak matches (only if no personal name conflict)
+            ("VIRGINIA PROPERTIES", False, False, True, "Weak business match only"),
+            ("ROANOKE DEVELOPMENT", False, False, True, "Weak business match only"),
+            
+            # Context-aware blocking
+            ("LIVING STREET", False, False, False, "Address context blocks all classification"),
+            ("CHURCH AVENUE", False, False, False, "Address context blocks all classification"),
+            ("TRUSTWORTHY FRIEND", False, False, False, "Personal name blocks classification"),
+        ]
+        
+        for name, exp_trust, exp_church, exp_business, description in priority_cases:
+            classification = self.classifier.classify_property(name)
+            
+            assert classification.is_trust == exp_trust, f"Trust failed for {name}: {description}"
+            assert classification.is_church == exp_church, f"Church failed for {name}: {description}"
+            assert classification.is_business == exp_business, f"Business failed for {name}: {description}"
+            
+            # Ensure only one classification type (or none)
+            total_classifications = sum([classification.is_trust, classification.is_church, classification.is_business])
+            assert total_classifications <= 1, f"Multiple classifications for {name}: T:{classification.is_trust} C:{classification.is_church} B:{classification.is_business}"
+    
+    def test_personal_name_detection(self):
+        """Test the personal name detection feature that prevents over-matching"""
+        personal_name_cases = [
+            # Should be detected as personal names (2 words, no strong business indicators)
+            ("JOHN SMITH", True, "Simple personal name"),
+            ("MARY JOHNSON", True, "Simple personal name"),
+            ("CHURCH BARBARA", True, "Surname happens to be Church"),
+            ("TRUSSELL JANET", True, "Surname contains 'trus'"),
+            ("UPCHURCH DAVID", True, "Surname contains 'church'"),
+            ("REAL ESTATE", True, "Two word phrase"),
+            
+            # Should NOT be detected as personal names (strong business/entity indicators)
+            ("SMITH FAMILY TRUST", False, "Contains entity phrase"),
+            ("FIRST BAPTIST CHURCH", False, "Contains entity phrase"),
+            ("ROANOKE PROPERTIES LLC", False, "Contains strong business indicator"),
+            ("MEDICAL CENTER AUTHORITY", False, "More than 2 words"),
+            ("HOUSING AUTHORITY", False, "Strong business indicator"),
+            
+            # Edge cases
+            ("JOHN", False, "Only one word"),
+            ("JOHN SMITH TRUST", False, "More than 2 words"),
+            ("", False, "Empty string"),
+        ]
+        
+        for name, expected, description in personal_name_cases:
+            is_personal = self.classifier._is_likely_personal_name(name.lower())
+            assert is_personal == expected, f"Personal name detection failed: {description} - '{name}' (got {is_personal}, expected {expected})"
+            
+            # Verify that personal names don't get classified as entities
+            if expected:  # If it should be detected as personal
+                classification = self.classifier.classify_property(name)
+                assert not classification.is_trust, f"Personal name incorrectly classified as trust: {name}"
+                assert not classification.is_church, f"Personal name incorrectly classified as church: {name}"
+                assert not classification.is_business, f"Personal name incorrectly classified as business: {name}"
 
 
 if __name__ == "__main__":
