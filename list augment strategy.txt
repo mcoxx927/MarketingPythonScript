@@ -1,11 +1,8 @@
-list augment with data we already have:
+The golden address is good it just needs to have the city state zip too.
 
-vacant flag = yes make it a niche list
-lien type, bk date, pre foreclosure
+Do I want to have the program create new niche lists or code the list name any new ones?
 
-skip trace data
-
-our mail house have any ideas?
+Should I have the skip trace add the record if it can't link it?
 
 incarcerated
 
