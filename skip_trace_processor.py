@@ -138,6 +138,9 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
         logger.warning(f"No skip trace data found for FIPS {region_fips}")
         # Add empty skip trace columns to enhanced_df
         enhanced_df['Golden_Address'] = None
+        enhanced_df['Golden_City'] = None
+        enhanced_df['Golden_State'] = None
+        enhanced_df['Golden_Zip'] = None
         enhanced_df['Golden_Address_Differs'] = False
         enhanced_df['ST_Flags'] = ''
         return enhanced_df
@@ -146,6 +149,9 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
     
     # Initialize skip trace columns in enhanced_df
     enhanced_df['Golden_Address'] = None
+    enhanced_df['Golden_City'] = None
+    enhanced_df['Golden_State'] = None
+    enhanced_df['Golden_Zip'] = None
     enhanced_df['Golden_Address_Differs'] = False  
     enhanced_df['ST_Flags'] = ''
     
@@ -169,7 +175,7 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
             if enh_apn and enh_apn != 'nan' and enh_apn in apn_lookup:
                 st_row = apn_lookup[enh_apn]
                 
-                # Apply Golden Address
+                # Apply Golden Address fields
                 if pd.notna(st_row.get('Golden Address')):
                     enhanced_df.loc[idx, 'Golden_Address'] = st_row['Golden Address']
                     # Check if different from original mailing address
@@ -178,6 +184,14 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
                         pd.notna(original_addr) and 
                         str(st_row['Golden Address']).strip() != str(original_addr).strip()
                     )
+                
+                # Apply Golden City, State, Zip
+                if pd.notna(st_row.get('Golden City')):
+                    enhanced_df.loc[idx, 'Golden_City'] = st_row['Golden City']
+                if pd.notna(st_row.get('Golden State')):
+                    enhanced_df.loc[idx, 'Golden_State'] = st_row['Golden State']
+                if pd.notna(st_row.get('Golden Zip')):
+                    enhanced_df.loc[idx, 'Golden_Zip'] = st_row['Golden Zip']
                 
                 # Apply skip trace flags
                 st_flags = _detect_skip_trace_flags(st_row)
@@ -238,7 +252,7 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
         
         # Apply match if found
         if st_row is not None:
-            # Apply Golden Address
+            # Apply Golden Address fields
             if pd.notna(st_row.get('Golden Address')):
                 enhanced_df.loc[idx, 'Golden_Address'] = st_row['Golden Address']
                 # Check if different from original mailing address
@@ -247,6 +261,14 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
                     pd.notna(original_addr) and 
                     str(st_row['Golden Address']).strip() != str(original_addr).strip()
                 )
+            
+            # Apply Golden City, State, Zip
+            if pd.notna(st_row.get('Golden City')):
+                enhanced_df.loc[idx, 'Golden_City'] = st_row['Golden City']
+            if pd.notna(st_row.get('Golden State')):
+                enhanced_df.loc[idx, 'Golden_State'] = st_row['Golden State']
+            if pd.notna(st_row.get('Golden Zip')):
+                enhanced_df.loc[idx, 'Golden_Zip'] = st_row['Golden Zip']
             
             # Apply skip trace flags
             st_flags = _detect_skip_trace_flags(st_row)
@@ -355,7 +377,7 @@ def process_region_skip_trace(region_key: str, enhanced_file_path: str, skip_tra
         
         # Validate skip trace file has required columns
         required_st_columns = ['Golden Address', 'Property FIPS', 'Property Address']
-        optional_st_columns = ['Property APN', 'Owner Bankruptcy', 'Owner Foreclosure', 'Lien', 'Judgment', 'Quitclaim', 'Owner Is Deceased']
+        optional_st_columns = ['Property APN', 'Golden City', 'Golden State', 'Golden Zip', 'Owner Bankruptcy', 'Owner Foreclosure', 'Lien', 'Judgment', 'Quitclaim', 'Owner Is Deceased']
         
         missing_required = [col for col in required_st_columns if col not in skip_trace_df.columns]
         if missing_required:
@@ -375,6 +397,9 @@ def process_region_skip_trace(region_key: str, enhanced_file_path: str, skip_tra
         
         # Generate summary stats
         golden_address_count = updated_df['Golden_Address'].notna().sum()
+        golden_city_count = updated_df['Golden_City'].notna().sum()
+        golden_state_count = updated_df['Golden_State'].notna().sum()
+        golden_zip_count = updated_df['Golden_Zip'].notna().sum()
         golden_differs_count = updated_df['Golden_Address_Differs'].sum()
         st_flags_count = (updated_df['ST_Flags'] != '').sum()
         
@@ -383,6 +408,9 @@ def process_region_skip_trace(region_key: str, enhanced_file_path: str, skip_tra
         print(f"Region: {config.region_name}")
         print(f"Total Records: {len(updated_df):,}")
         print(f"Records with Golden Address: {golden_address_count:,}")
+        print(f"Records with Golden City: {golden_city_count:,}")
+        print(f"Records with Golden State: {golden_state_count:,}")
+        print(f"Records with Golden Zip: {golden_zip_count:,}")
         print(f"Golden Address differs from original: {golden_differs_count:,}")
         print(f"Records with Skip Trace flags: {st_flags_count:,}")
         
@@ -409,6 +437,9 @@ def process_region_skip_trace(region_key: str, enhanced_file_path: str, skip_tra
             'region_name': config.region_name,
             'total_records': len(updated_df),
             'golden_address_count': golden_address_count,
+            'golden_city_count': golden_city_count,
+            'golden_state_count': golden_state_count,
+            'golden_zip_count': golden_zip_count,
             'golden_differs_count': golden_differs_count,
             'st_flags_count': st_flags_count,
             'output_file': str(enhanced_file)
@@ -525,11 +556,17 @@ Examples:
             
             if successful:
                 total_records = sum(r.get('total_records', 0) for r in successful)
-                total_golden = sum(r.get('golden_address_count', 0) for r in successful)
+                total_golden_address = sum(r.get('golden_address_count', 0) for r in successful)
+                total_golden_city = sum(r.get('golden_city_count', 0) for r in successful)
+                total_golden_state = sum(r.get('golden_state_count', 0) for r in successful)
+                total_golden_zip = sum(r.get('golden_zip_count', 0) for r in successful)
                 total_st_flags = sum(r.get('st_flags_count', 0) for r in successful)
                 
                 print(f"Total records processed: {total_records:,}")
-                print(f"Total Golden Addresses added: {total_golden:,}")
+                print(f"Total Golden Addresses added: {total_golden_address:,}")
+                print(f"Total Golden Cities added: {total_golden_city:,}")
+                print(f"Total Golden States added: {total_golden_state:,}")
+                print(f"Total Golden Zips added: {total_golden_zip:,}")
                 print(f"Total records with ST flags: {total_st_flags:,}")
             
             if failed:
