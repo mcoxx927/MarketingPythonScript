@@ -147,13 +147,13 @@ class MultiRegionConfigManager:
         """Validate that required files exist for a region"""
         region_dir = self.get_region_directory(region_key)
         
-        # Check for main region file
-        main_files = list(region_dir.glob("main_region.*"))
-        has_main = len(main_files) > 0
-        
         # Check for Excel files
         excel_files = list(region_dir.glob("*.xlsx"))
         has_excel = len(excel_files) > 0
+        
+        # Check for main region file (specifically named or any Excel files as fallback)
+        main_files = list(region_dir.glob("main_region.*"))
+        has_main = len(main_files) > 0 or has_excel
         
         return {
             'has_config': (region_dir / "config.json").exists(),

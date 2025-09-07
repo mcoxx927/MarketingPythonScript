@@ -55,6 +55,8 @@ def _detect_niche_type_from_filename(filename: str) -> str:
         return 'InterFamily'
     elif 'cash' in filename_lower and 'buyer' in filename_lower:
         return 'CashBuyer'
+    elif 'vacant' in filename_lower:
+        return 'Vacant'
     else:
         return 'Other'
 
@@ -80,6 +82,103 @@ def _normalize_address(address_str) -> str:
     addr = re.sub(r'\s+', ' ', addr)
     
     return addr
+
+def _append_unique_records(main_df: pd.DataFrame, recent_sales_df: pd.DataFrame) -> tuple:
+    """
+    Append unique records from recent sales to main DataFrame.
+    
+    Returns:
+        tuple: (combined_dataframe, records_added_count)
+    """
+    if recent_sales_df.empty:
+        return main_df, 0
+    
+    # Normalize addresses for matching
+    main_df_temp = main_df.copy()
+    recent_sales_temp = recent_sales_df.copy()
+    
+    main_df_temp['_NormalizedAddress'] = main_df_temp['Address'].apply(_normalize_address)
+    recent_sales_temp['_NormalizedAddress'] = recent_sales_temp['Address'].apply(_normalize_address)
+    
+    # Filter out records with empty addresses
+    recent_sales_clean = recent_sales_temp[recent_sales_temp['_NormalizedAddress'] != ''].copy()
+    
+    # Find records in recent sales that don't exist in main
+    existing_addresses = set(main_df_temp['_NormalizedAddress'].unique())
+    new_records = recent_sales_clean[~recent_sales_clean['_NormalizedAddress'].isin(existing_addresses)].copy()
+    
+    records_added = 0
+    if len(new_records) > 0:
+        # Remove temporary column before concatenation
+        new_records.drop(columns=['_NormalizedAddress'], inplace=True, errors='ignore')
+        
+        # Concatenate new records to main DataFrame
+        main_df = pd.concat([main_df, new_records], ignore_index=True, sort=False)
+        records_added = len(new_records)
+    
+    # Clean up temporary column from main DataFrame
+    if '_NormalizedAddress' in main_df.columns:
+        main_df.drop(columns=['_NormalizedAddress'], inplace=True, errors='ignore')
+    
+    return main_df, records_added
+
+def _cleanup_fips_mismatches(region_dir: Path, expected_fips: str, fips_mismatches: List[Dict]) -> bool:
+    """
+    Clean files by removing records that don't match the expected FIPS code.
+    
+    Args:
+        region_dir: Path to the region directory
+        expected_fips: The correct FIPS code for this region
+        fips_mismatches: List of files with FIPS mismatches
+        
+    Returns:
+        bool: True if cleanup succeeded, False otherwise
+    """
+    try:
+        for mismatch in fips_mismatches:
+            file_path = region_dir / mismatch['file']
+            backup_path = region_dir / f"{mismatch['file']}.backup"
+            
+            print(f"  Processing: {mismatch['file']}")
+            
+            try:
+                # Read the original file
+                df = pd.read_excel(file_path)
+                original_count = len(df)
+                
+                # Create backup
+                df.to_excel(backup_path, index=False)
+                print(f"    Backup created: {backup_path.name}")
+                
+                # Filter to keep only expected FIPS
+                if 'FIPS' not in df.columns:
+                    print(f"    WARNING: No FIPS column found in {mismatch['file']}")
+                    continue
+                
+                # Filter records
+                filtered_df = df[df['FIPS'].astype(str) == str(expected_fips)].copy()
+                filtered_count = len(filtered_df)
+                removed_count = original_count - filtered_count
+                
+                if filtered_count == 0:
+                    print(f"    ERROR: No records would remain after filtering {mismatch['file']}")
+                    return False
+                
+                # Save cleaned file
+                filtered_df.to_excel(file_path, index=False)
+                print(f"    Cleaned: {original_count:,} -> {filtered_count:,} records ({removed_count:,} removed)")
+                
+            except Exception as file_error:
+                print(f"    ERROR cleaning {mismatch['file']}: {file_error}")
+                logger.error(f"Error cleaning {mismatch['file']}: {file_error}")
+                return False
+        
+        return True
+        
+    except Exception as e:
+        print(f"ERROR in cleanup process: {e}")
+        logger.error(f"Error in FIPS cleanup process: {e}")
+        return False
 
 def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche_type: str) -> tuple:
     """
@@ -183,7 +282,7 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
     
     return updates_count, inserts_count
 
-def process_region(region_key: str, config_manager: MultiRegionConfigManager) -> Dict:
+def process_region(region_key: str, config_manager: MultiRegionConfigManager, auto_clean_fips: bool = False) -> Dict:
     """
     Process a single region's files.
     
@@ -250,13 +349,41 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager) ->
                 for mismatch in fips_validation['fips_mismatches']:
                     print(f"    {mismatch['file']}: expected {mismatch['expected']}, found {mismatch['found']}")
             
-            return {'success': False, 'error': 'FIPS validation failed - files contain wrong region data'}
+            # Offer cleanup option
+            print("\nWould you like to automatically clean the files to remove records with incorrect FIPS codes?")
+            print("This will:")
+            print("  - Keep only records matching the expected FIPS code")
+            print("  - Create backup files with '.backup' extension")
+            print("  - Update the original files in place")
+            
+            if auto_clean_fips:
+                print("Auto-clean enabled - cleaning files automatically...")
+                response = 'yes'
+            else:
+                response = input("\nClean files automatically? (y/n): ").lower().strip()
+            
+            if response in ['y', 'yes']:
+                print("\nCleaning files...")
+                cleanup_success = _cleanup_fips_mismatches(region_dir, fips_validation['region_fips'], fips_validation['fips_mismatches'])
+                
+                if cleanup_success:
+                    print("Files cleaned successfully! Re-validating...")
+                    # Re-validate after cleanup
+                    fips_validation = config_manager.validate_fips_codes(region_key)
+                    
+                    if fips_validation['all_valid']:
+                        print(f"SUCCESS: All files now match FIPS {fips_validation['region_fips']}")
+                    else:
+                        print("ERROR: Cleanup failed - files still contain mismatched FIPS codes")
+                        return {'success': False, 'error': 'FIPS cleanup failed'}
+                else:
+                    print("ERROR: File cleanup failed")
+                    return {'success': False, 'error': 'FIPS cleanup failed'}
+            else:
+                print("Cleanup cancelled by user")
+                return {'success': False, 'error': 'FIPS validation failed - files contain wrong region data'}
         
         print(f"FIPS validation passed - all {fips_validation['files_checked']} files match region {fips_validation['region_fips']}")
-        
-        # 1. PROCESS MAIN REGION FILE
-        print("\\nSTEP 1: Processing Main Region File")
-        print("-" * 50)
         
         # Find Excel files
         excel_files = list(region_dir.glob("*.xlsx"))
@@ -272,26 +399,98 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager) ->
             # Fall back to largest file
             main_file = max(excel_files, key=lambda f: f.stat().st_size)
         
-        print(f"Processing main file: {main_file.name} ({main_file.stat().st_size:,} bytes)")
+        # Find recent sales files
+        recent_sales_files = [f for f in excel_files if 'recent' in f.name.lower() and 'sales' in f.name.lower()]
         
-        # Create property processor with region-specific settings
-        processor = PropertyProcessor(
-            region_input_date1=config.region_input_date1,
-            region_input_date2=config.region_input_date2,
-            region_input_amount1=config.region_input_amount1,
-            region_input_amount2=config.region_input_amount2
-        )
-        
-        # Process main file
-        main_result = processor.process_excel_file(str(main_file))
+        # 1. MERGE RECENT SALES WITH MAIN FILE (if any)
+        if recent_sales_files:
+            print("\\nSTEP 1: Merging Recent Sales with Main File")
+            print("-" * 50)
+            
+            # Load main file
+            print(f"Loading main file: {main_file.name} ({main_file.stat().st_size:,} bytes)")
+            main_df = pd.read_excel(main_file)
+            print(f"Main file loaded: {len(main_df):,} records")
+            
+            total_added = 0
+            for recent_file in recent_sales_files:
+                try:
+                    print(f"Processing recent sales: {recent_file.name}")
+                    recent_df = pd.read_excel(recent_file)
+                    
+                    if recent_df.empty:
+                        print(f"   WARNING: Empty recent sales file: {recent_file.name}")
+                        continue
+                    
+                    print(f"   Loaded {len(recent_df):,} recent sales records")
+                    
+                    # Merge unique records
+                    main_df, added_count = _append_unique_records(main_df, recent_df)
+                    total_added += added_count
+                    
+                    print(f"   SUCCESS: {added_count:,} unique records added from recent sales")
+                    
+                except Exception as e:
+                    print(f"   ERROR: Failed to process recent sales file {recent_file.name}: {e}")
+                    logger.error(f"Failed to process recent sales file {recent_file.name}: {e}")
+            
+            print(f"\\nMERGE SUMMARY:")
+            print(f"   Original main file records: {len(main_df) - total_added:,}")
+            print(f"   Recent sales records added: {total_added:,}")
+            print(f"   Combined dataset size: {len(main_df):,}")
+            
+            # Create property processor with region-specific settings
+            processor = PropertyProcessor(
+                region_input_date1=config.region_input_date1,
+                region_input_date2=config.region_input_date2,
+                region_input_amount1=config.region_input_amount1,
+                region_input_amount2=config.region_input_amount2
+            )
+            
+            # Process the combined dataset
+            print("\\nSTEP 2: Processing Combined Dataset")
+            print("-" * 50)
+            
+            # Save combined dataset to temporary file for processing
+            temp_combined_file = region_dir / "temp_combined_main.xlsx"
+            try:
+                main_df.to_excel(temp_combined_file, index=False)
+                main_result = processor.process_excel_file(str(temp_combined_file))
+                # Clean up temporary file
+                temp_combined_file.unlink()
+            except Exception as e:
+                # Clean up temporary file if it exists
+                if temp_combined_file.exists():
+                    temp_combined_file.unlink()
+                raise e
+            
+        else:
+            # No recent sales files, process main file normally
+            print("\\nSTEP 1: Processing Main Region File")
+            print("-" * 50)
+            print(f"Processing main file: {main_file.name} ({main_file.stat().st_size:,} bytes)")
+            
+            # Create property processor with region-specific settings
+            processor = PropertyProcessor(
+                region_input_date1=config.region_input_date1,
+                region_input_date2=config.region_input_date2,
+                region_input_amount1=config.region_input_amount1,
+                region_input_amount2=config.region_input_amount2
+            )
+            
+            # Process main file
+            main_result = processor.process_excel_file(str(main_file))
         
         print(f"SUCCESS: Main region processed - {len(main_result):,} records")
         
         # 2. PROCESS NICHE LISTS
-        print("\\nSTEP 2: Processing Niche Lists (Updating Main Region)")
+        if recent_sales_files:
+            print("\\nSTEP 3: Processing Niche Lists (Updating Combined Dataset)")
+        else:
+            print("\\nSTEP 2: Processing Niche Lists (Updating Main Region)")
         print("-" * 50)
         
-        niche_files = [f for f in excel_files if f != main_file]
+        niche_files = [f for f in excel_files if f != main_file and f not in recent_sales_files]
         total_updates = 0
         total_inserts = 0
         
@@ -481,6 +680,8 @@ Examples:
     group.add_argument("--all-regions", action="store_true", help="Process all regions")
     group.add_argument("--list-regions", action="store_true", help="List available regions")
     
+    parser.add_argument("--auto-clean-fips", action="store_true", help="Automatically clean files with FIPS mismatches")
+    
     args = parser.parse_args()
     
     try:
@@ -499,7 +700,7 @@ Examples:
             
         elif args.region:
             # Process single region
-            result = process_region(args.region, config_manager)
+            result = process_region(args.region, config_manager, args.auto_clean_fips)
             
             if result['success']:
                 print("\\n[SUCCESS] Processing completed successfully!")
@@ -515,7 +716,7 @@ Examples:
             results = []
             for region_key in config_manager.configs.keys():
                 print(f"\\nStarting {region_key}...")
-                result = process_region(region_key, config_manager)
+                result = process_region(region_key, config_manager, args.auto_clean_fips)
                 results.append(result)
             
             # Summary of all regions
