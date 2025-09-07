@@ -34,6 +34,21 @@ python analyze_excel_structure.py
 python main_processor.py
 ```
 
+**Integrate skip trace data into enhanced files:**
+```bash
+python skip_trace_processor.py --region roanoke_city_va --skip-trace-file "skip_trace_data.xlsx"
+```
+
+**Process skip trace for all regions:**
+```bash
+python skip_trace_processor.py --all-regions --skip-trace-file "skip_trace_data.xlsx"
+```
+
+**Skip trace with specific enhanced file:**
+```bash
+python skip_trace_processor.py --region roanoke_city_va --enhanced-file "output/roanoke_city_va/2024_01/roa_main_region_enhanced_20240115.xlsx" --skip-trace-file "skip_trace_data.xlsx"
+```
+
 ## Architecture Overview
 
 This is a multi-region real estate direct mail processing system that replaces SQL stored procedures with Python. The system processes property data and assigns priority scores for marketing campaigns.
@@ -42,6 +57,7 @@ This is a multi-region real estate direct mail processing system that replaces S
 
 **Main Processing Pipeline:**
 - `monthly_processing_v2.py` - Multi-region orchestrator with standardized file naming
+- `skip_trace_processor.py` - Skip trace data integration with Golden Address and distress flags
 - `multi_region_config.py` - Configuration management for 11 regions 
 - `property_processor.py` - Core property classification and priority scoring
 - `main_processor.py` - Legacy single-region processor (still maintained)
@@ -55,6 +71,10 @@ This is a multi-region real estate direct mail processing system that replaces S
 1. **Main Region Processing** - Processes main property file (~21k records) using PropertyClassifier and PropertyPriorityScorer classes
 2. **Niche List Integration** - Overlays distress indicators (liens, foreclosure, bankruptcy) onto existing priorities
 3. **Enhanced Priority Codes** - Creates combined codes like "Liens-ABS1" or "Tax-PreForeclosure-BUY2"
+4. **Skip Trace Enhancement** - Post-processing integration with enhanced city-aware matching:
+   - Hybrid strategy: APN+FIPS (most accurate), Address+City (prevents cross-city false matches)
+   - Integrates Golden Address and skip trace distress flags (STBankruptcy, STForeclosure, STLien, STJudgment, STQuitclaim, STDeceased)
+   - Typical performance: ~2,600 APN matches + ~1,500 city-validated address matches per region
 
 ### Business Logic Architecture
 
@@ -73,6 +93,13 @@ This is a multi-region real estate direct mail processing system that replaces S
 - Address-based matching between main region and niche files
 - Updates existing records with compound priority codes
 - Inserts niche-only records not found in main region
+
+**Skip Trace Integration** (`skip_trace_processor.py`):
+- Hybrid matching strategy: APN+FIPS (primary), Address+City (fallback)
+- City-aware matching prevents cross-city false matches in multi-region skip trace files
+- Golden Address integration with difference detection for A/B testing
+- Skip trace flag detection: STDeceased, STBankruptcy, STForeclosure, STLien, STJudgment, STQuitclaim
+- Priority code enhancement with skip trace flags (e.g., "STBankruptcy-ABS1")
 
 ### File Structure
 

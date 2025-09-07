@@ -1,8 +1,8 @@
-# Multi-Region Real Estate Processing System
+# Multi-Region Real Estate Direct Mail Processing System
 
 ## Overview
 
-This system processes real estate direct mail data for multiple regions simultaneously, with each region having its own configuration, file organization, and output structure. It supports 10+ regions with market-specific thresholds and standardized workflows.
+This system processes real estate direct mail data for multiple regions simultaneously, with complete workflow from initial processing through skip trace integration. Each region has its own configuration, file organization, and output structure. It supports 10+ regions with market-specific thresholds and standardized workflows including skip trace enhancement.
 
 ## 🎯 Key Features
 
@@ -12,6 +12,8 @@ This system processes real estate direct mail data for multiple regions simultan
 ✅ **Standardized Workflow** - Consistent processing across all regions  
 ✅ **Batch Processing** - Process all regions with one command  
 ✅ **Enhanced Priority Codes** - Niche indicators append to existing priorities  
+✅ **Skip Trace Integration** - Golden Address and distress flag enhancement  
+✅ **Complete Direct Mail Cycle** - From initial processing to skip trace enhancement  
 ✅ **Organized Output** - Region-specific output folders with timestamps  
 
 ## 📁 Directory Structure
@@ -39,6 +41,7 @@ MarketingPythonScript/
 │   │       └── processing_20250903_1430.log
 │   └── ... (region-specific outputs)
 ├── monthly_processing_v2.py          # Multi-region processor
+├── skip_trace_processor.py           # Skip trace integration processor
 ├── multi_region_config.py            # Configuration system
 └── ... (existing processing modules)
 ```
@@ -59,6 +62,58 @@ python monthly_processing_v2.py --region roanoke_city_va
 ```bash
 python monthly_processing_v2.py --all-regions
 ```
+
+## 🔄 Complete Direct Mail Cycle
+
+### Phase 1: Initial Processing (Monthly)
+Process property data and create enhanced files with priority codes:
+
+```bash
+# Process single region
+python monthly_processing_v2.py --region roanoke_city_va
+
+# Process all regions
+python monthly_processing_v2.py --all-regions
+```
+
+**Output:** `{region_code}_main_region_enhanced_YYYYMMDD.xlsx` with priority codes like:
+- `ABS1` - High-priority absentee owners
+- `Liens-ABS1` - Absentee owners with liens
+- `STBankruptcy-Liens-ABS1` - Multiple distress indicators
+
+### Phase 2: Direct Mail Campaign (Weekly)
+Use enhanced files for weekly direct mail campaigns:
+- Mail to highest priority records first
+- Cycle through priority levels weekly
+- Track which records were mailed
+
+### Phase 3: Skip Trace Integration (Weekly)
+After mailing, integrate skip trace data back into enhanced files:
+
+```bash
+# Skip trace single region (auto-finds latest enhanced file)
+python skip_trace_processor.py --region roanoke_city_va --skip-trace-file "weekly_skip_trace.xlsx"
+
+# Skip trace all regions
+python skip_trace_processor.py --all-regions --skip-trace-file "weekly_skip_trace.xlsx"
+
+# Skip trace with specific enhanced file
+python skip_trace_processor.py --region roanoke_city_va --enhanced-file "output/roanoke_city_va/2024_01/roa_main_region_enhanced_20240115.xlsx" --skip-trace-file "weekly_skip_trace.xlsx"
+```
+
+**Skip Trace Enhancements:**
+- **Golden Address** - Enhanced mailing addresses from skip trace provider
+- **Golden_Address_Differs** - Flag when Golden Address differs from original (for A/B testing)
+- **Skip Trace Flags** - STBankruptcy, STForeclosure, STLien, STJudgment, STQuitclaim, STDeceased
+- **Enhanced Priority Codes** - Combines existing priorities with skip trace flags
+
+### Phase 4: Enhanced Records Ready
+Updated enhanced files now contain:
+- Original property data and priority codes
+- Golden Address improvements
+- Skip trace distress indicators
+- Phone numbers (when available)
+- Combined priority codes like `STLien-Bankruptcy-ABS1`
 
 ## ⚙️ Setting Up a New Region
 
@@ -112,6 +167,41 @@ Place your Excel files in the region folder using these names:
 ```bash
 python multi_region_config.py
 ```
+
+## 📊 Skip Trace Data Requirements
+
+### Required Skip Trace File Columns
+Your skip trace provider file must contain these columns:
+
+**Required:**
+- `Property FIPS` - FIPS code matching your region configuration
+- `Property Address` - Property address for matching
+- `Golden Address` - Enhanced mailing address from skip trace provider
+
+**Optional (for distress flags):**
+- `Property APN` - Assessor's Parcel Number (improves matching accuracy)
+- `Owner Bankruptcy` - True/False for bankruptcy flag
+- `Owner Foreclosure` - True/False for foreclosure flag  
+- `Lien` - True/False for lien flag
+- `Judgment` - True/False for judgment flag
+- `Quitclaim` - True/False for quitclaim flag
+- `Owner Is Deceased` - True/False for deceased owner flag
+
+### Skip Trace Matching Strategy
+The system uses a hybrid matching approach:
+
+1. **Primary Match:** Property APN + Property FIPS (most accurate)
+2. **Fallback Match:** Normalized address matching using Property Address
+3. **FIPS Filtering:** Only processes records matching the region's FIPS code
+
+### Skip Trace Flag Values
+The system recognizes these values as "True":
+- `True`, `true`, `TRUE`
+- `Yes`, `yes`, `YES` 
+- `1`
+- `y`, `Y`
+
+All other values (False, No, 0, empty, etc.) are treated as False.
 
 ## 📊 How Processing Works
 
@@ -171,9 +261,11 @@ python multi_region_config.py
 - `region_input_date1`: 5-8 years ago  
 - `region_input_date2`: 2-3 years ago
 
-## 📋 Monthly Processing Workflow
+## 📋 Complete Monthly Processing Workflow
 
-### 1. Prepare Files (Monthly)
+### 1. Monthly Initial Processing
+
+#### Prepare Files
 ```bash
 # For each region you're processing:
 # 1. Export data from your data source
@@ -181,7 +273,7 @@ python multi_region_config.py
 # 3. Place in appropriate region folder
 ```
 
-### 2. Validate Setup
+#### Validate Setup
 ```bash
 # Check region configurations
 python multi_region_config.py
@@ -190,7 +282,7 @@ python multi_region_config.py
 python monthly_processing_v2.py --list-regions
 ```
 
-### 3. Process Regions
+#### Process Regions
 ```bash
 # Process single region
 python monthly_processing_v2.py --region roanoke_city_va
@@ -199,10 +291,47 @@ python monthly_processing_v2.py --region roanoke_city_va
 python monthly_processing_v2.py --all-regions
 ```
 
-### 4. Review Results
-- Check `output/region_name/YYYY_MM/` for results
+#### Review Initial Results
+- Check `output/region_name/YYYY_MM/` for enhanced files
 - Review processing logs for any issues
-- Validate enhanced priority codes
+- Validate enhanced priority codes and niche integration
+
+### 2. Weekly Direct Mail Campaigns
+- Use enhanced files for weekly mailings
+- Mail highest priority records first
+- Track which records were sent mail
+- Collect mailing data for skip trace
+
+### 3. Weekly Skip Trace Integration
+
+#### Receive Skip Trace Data
+- Get skip trace results from your provider
+- Ensure file contains required columns (FIPS, Address, Golden Address)
+- Place skip trace file in accessible location
+
+#### Process Skip Trace Integration
+```bash
+# Auto-find latest enhanced files and integrate skip trace
+python skip_trace_processor.py --all-regions --skip-trace-file "weekly_skip_trace_YYYYMMDD.xlsx"
+
+# Process specific region
+python skip_trace_processor.py --region roanoke_city_va --skip-trace-file "weekly_skip_trace_YYYYMMDD.xlsx"
+
+# Use specific enhanced file
+python skip_trace_processor.py --region roanoke_city_va --enhanced-file "output/roanoke_city_va/2024_01/roa_main_region_enhanced_20240115.xlsx" --skip-trace-file "skip_trace.xlsx"
+```
+
+#### Review Skip Trace Results
+- Check enhanced files were updated in-place
+- Review Golden Address differ counts for A/B testing
+- Validate skip trace flags were properly applied
+- Check enhanced priority codes include ST flags
+
+### 4. Continue Direct Mail Cycle
+- Use skip trace enhanced files for subsequent mailings
+- Leverage Golden Addresses for improved deliverability
+- Use ST flags for targeted campaigns
+- Repeat weekly skip trace integration as needed
 
 ## 🔍 Output Files
 
@@ -215,15 +344,21 @@ python monthly_processing_v2.py --all-regions
 - `rich_main_region_enhanced_20250903.xlsx` (Richmond)
 
 **Original Columns:** All columns from your source data  
-**Added Columns:**
+**Added Columns (Initial Processing):**
 - `IsTrust`, `IsChurch`, `IsBusiness` - Property classifications
 - `IsOwnerOccupied` - Owner occupancy determination
 - `PriorityId`, `PriorityCode`, `PriorityName` - Priority assignments
 - `ParsedSaleDate`, `ParsedSaleAmount` - Cleaned data fields
 
-**Enhanced Priority Codes:**
-- Original: `ABS1`, `OWN20`, `BUY2`, etc.
-- Enhanced: `Liens-ABS1`, `Tax-Landlord-OWN20`, `PreForeclosure-BUY2`
+**Added Columns (Skip Trace Enhancement):**
+- `Golden_Address` - Enhanced mailing address from skip trace
+- `Golden_Address_Differs` - Boolean flag when Golden Address ≠ original address
+- `ST_Flags` - Comma-separated skip trace flags (STBankruptcy, STLien, STDeceased, etc.)
+
+**Enhanced Priority Codes Evolution:**
+- **Initial:** `ABS1`, `OWN20`, `BUY2`, etc.
+- **With Niche:** `Liens-ABS1`, `Tax-Landlord-OWN20`, `PreForeclosure-BUY2`
+- **With Skip Trace:** `STBankruptcy-Liens-ABS1`, `STDeceased-Tax-Landlord-OWN20`
 
 ### Processing Log
 **`{region_code}_processing_YYYYMMDD_HHMM.log`** - Detailed processing log with:
@@ -263,13 +398,43 @@ python monthly_processing_v2.py --all-regions
 - Check for unusual address formats in your data
 - Review processing logs for specific issues
 
+### Skip Trace Specific Issues
+
+**"No enhanced files found"**
+- Run initial processing first: `python monthly_processing_v2.py --region region_name`
+- Verify enhanced files exist in `output/region_name/YYYY_MM/`
+- Check enhanced file naming matches pattern `*_main_region_enhanced_*.xlsx`
+
+**"Skip trace file missing required columns"**
+- Verify skip trace file contains: Property FIPS, Property Address, Golden Address
+- Check column names match exactly (case sensitive)
+- Ensure Property FIPS column contains numeric values
+
+**"No skip trace matches found"**
+- Check Property FIPS codes in skip trace file match region configurations
+- Verify Property Address in skip trace file match format in enhanced files
+- Review matching logic: Property APN+Property FIPS primary, Property Address fallback
+
+**"Golden Address differs count is 0"**
+- Check if Golden Address column contains different addresses
+- Verify Golden Address isn't identical to Mailing Address
+- Review address comparison logic in processing logs
+
+**"Skip trace flags not applied"**
+- Ensure flag columns use recognized True values: True, Yes, 1, Y
+- Check for extra spaces or unusual formatting in flag columns
+- Verify flag column names match: Owner Bankruptcy, Lien, etc.
+
 ### Validation Commands
 ```bash
 # Test configuration loading
 python multi_region_config.py
 
-# Validate specific region
+# Validate specific region initial processing
 python monthly_processing_v2.py --region test_region
+
+# Test skip trace processing with small file
+python skip_trace_processor.py --region test_region --skip-trace-file "test_skip_trace.xlsx"
 ```
 
 ### Debug Mode
