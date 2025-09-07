@@ -1,7 +1,3 @@
-The golden address is good it just needs to have the city state zip too.
-
-Do I want to have the program create new niche lists or code the list name any new ones?
-
 Should I have the skip trace add the record if it can't link it?
 
 incarcerated

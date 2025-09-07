@@ -71,11 +71,182 @@ WHEN MATCHED AND (l.InsertedDate >= DATEADD(MM, -6, GETDATE())
                  or l.UpdatedDate >= DATEADD(MM, -6, GETDATE())) THEN
 ```
 
+## Simplified Modern Architecture (Recommended Approach)
+
+### Replace Complex List Code System with Clean Data Model
+
+The current SQL system creates complex compound codes like `"HE-Liens-ABS1"` and requires dynamic `ListPriorityId` creation. **This is unnecessarily complex and hard to maintain.** 
+
+Instead, let's modernize with a **clean separation of concerns**:
+
+### Python Must Handle Dynamic List Creation
+
+```python
+class ListPriorityManager:
+    """Manages dynamic creation of ListPriority records and their unique IDs"""
+    
+    def __init__(self, db_integrator: DatabaseIntegrator):
+        self.db_integrator = db_integrator
+        self._list_priority_cache = {}  # Cache existing codes to avoid duplicates
+        
+    def get_or_create_list_priority_id(self, list_code: str) -> int:
+        """
+        Get existing ListPriorityId or create new one for unique list code.
+        
+        CRITICAL: This replicates the SQL MERGE logic for ListPriority table.
+        """
+        if list_code in self._list_priority_cache:
+            return self._list_priority_cache[list_code]
+            
+        # Check if code already exists in database
+        existing_id = self._get_existing_list_priority_id(list_code)
+        if existing_id:
+            self._list_priority_cache[list_code] = existing_id
+            return existing_id
+            
+        # Create new ListPriority record
+        new_id = self._create_new_list_priority(list_code)
+        self._list_priority_cache[list_code] = new_id
+        return new_id
+    
+    def _get_existing_list_priority_id(self, list_code: str) -> Optional[int]:
+        """Query database for existing ListPriorityId"""
+        with pyodbc.connect(self.db_integrator.conn_str) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT ListPriorityId FROM ListPriority WHERE Code = ?", list_code)
+            result = cursor.fetchone()
+            return result[0] if result else None
+    
+    def _create_new_list_priority(self, list_code: str) -> int:
+        """Create new ListPriority record and return its ID"""
+        with pyodbc.connect(self.db_integrator.conn_str) as conn:
+            cursor = conn.cursor()
+            
+            # Insert new ListPriority record
+            cursor.execute("""
+                INSERT INTO ListPriority (Code, Name, PriorityLevel, ProcessingOrder, IsAbsentee)
+                VALUES (?, ?, 0, 0, 2)
+            """, list_code, list_code)
+            
+            # Get the new ID
+            cursor.execute("SELECT SCOPE_IDENTITY()")
+            new_id = int(cursor.fetchone()[0])
+            
+            # Add to RegionListFrequency for all regions (replicates SQL logic)
+            cursor.execute("SELECT RegionId FROM Region")
+            all_regions = [row[0] for row in cursor.fetchall()]
+            
+            for region_id in all_regions:
+                cursor.execute("""
+                    INSERT INTO RegionListFrequency (Frequency, ListId, RegionId, DividedBy)
+                    VALUES (26, ?, ?, 4)
+                """, new_id, region_id)
+            
+            conn.commit()
+            return new_id
+
+    def generate_enhanced_list_codes(self, processed_df: pd.DataFrame) -> pd.Series:
+        """
+        Generate enhanced list codes following SQL logic from ProcessUploadLog_Newtest.
+        
+        This replicates the complex enhancement logic in lines 807-841 of the SQL procedure.
+        """
+        enhanced_codes = processed_df['PriorityCode'].copy()  # Start with base priority code
+        
+        # High Equity enhancement (EstLoanToValue <= 50% and > 0%)
+        high_equity_mask = (
+            (processed_df['EstLoanToValue'] <= 50.0) & 
+            (processed_df['EstLoanToValue'] > 0.0)
+        )
+        enhanced_codes.loc[high_equity_mask] = 'HE-' + enhanced_codes.loc[high_equity_mask]
+        
+        # Liens enhancement
+        liens_mask = processed_df['LienType'].notna() & (processed_df['LienType'] != '')
+        enhanced_codes.loc[liens_mask] = 'Liens-' + enhanced_codes.loc[liens_mask]
+        
+        # Bankruptcy enhancement  
+        bankruptcy_mask = processed_df['BKDate'].notna()
+        enhanced_codes.loc[bankruptcy_mask] = 'Bankrupcy-' + enhanced_codes.loc[bankruptcy_mask]
+        
+        # Divorce enhancement
+        divorce_mask = processed_df['DivorceDate'].notna()
+        enhanced_codes.loc[divorce_mask] = 'Divorce-' + enhanced_codes.loc[divorce_mask]
+        
+        # Pre-Foreclosure enhancement
+        prefc_mask = processed_df['PreFcRecordingDate'].notna()
+        enhanced_codes.loc[prefc_mask] = 'PreFor-' + enhanced_codes.loc[prefc_mask]
+        
+        # Free & Clear enhancement (EstLoanToValue = 0 and EstEquity exists)
+        free_clear_mask = (
+            (processed_df['EstLoanToValue'] == 0.0) & 
+            processed_df['EstEquity'].notna() & 
+            (processed_df['EstEquity'] != '')
+        )
+        enhanced_codes.loc[free_clear_mask] = 'F&C-' + enhanced_codes.loc[free_clear_mask]
+        
+        # Vacant enhancement
+        vacant_mask = processed_df['Vacant'] == 'Yes'
+        enhanced_codes.loc[vacant_mask] = 'Vacant-' + enhanced_codes.loc[vacant_mask]
+        
+        # NCOA Moves enhancement (ResponseNCOA = 'A', '91', or '92')
+        ncoa_moves_mask = processed_df['ResponseNCOA'].isin(['A', '91', '92'])
+        enhanced_codes.loc[ncoa_moves_mask] = 'NCOA_Moves-' + enhanced_codes.loc[ncoa_moves_mask]
+        
+        # NCOA Drops enhancement (ResponseNCOA exists but not 'A', '91', '92')
+        ncoa_drops_mask = (
+            processed_df['ResponseNCOA'].notna() & 
+            (processed_df['ResponseNCOA'] != '') &
+            ~processed_df['ResponseNCOA'].isin(['A', '91', '92'])
+        )
+        enhanced_codes.loc[ncoa_drops_mask] = 'NCOA_Drops-' + enhanced_codes.loc[ncoa_drops_mask]
+        
+        return enhanced_codes
+```
+
+### Integration with Niche List Processing
+
+```python
+def process_niche_list_integration(self, main_df: pd.DataFrame, niche_files: List[str], 
+                                 list_manager: ListPriorityManager) -> pd.DataFrame:
+    """
+    Integrate niche lists and create compound list codes.
+    
+    Replicates GetFinalizedNicheList stored procedure logic.
+    """
+    enhanced_df = main_df.copy()
+    
+    for niche_file in niche_files:
+        niche_df = pd.read_excel(niche_file)
+        niche_type = self._extract_niche_type_from_filename(niche_file)  # e.g., "Liens", "Foreclosure"
+        
+        # Match on PrimaryLocationId first, then address fallback
+        matched_records = self._match_niche_records(enhanced_df, niche_df)
+        
+        for idx, record in matched_records.iterrows():
+            existing_code = record['PriorityCode']
+            
+            # Create compound code: "NicheType - ExistingCode"
+            compound_code = f"{niche_type} - {existing_code}"
+            
+            # Check if existing code already contains this niche type
+            if f" - {existing_code}" in existing_code and niche_type in existing_code:
+                compound_code = existing_code  # Don't duplicate
+            
+            # Get or create ListPriorityId for this unique compound code
+            list_priority_id = list_manager.get_or_create_list_priority_id(compound_code)
+            
+            # Update the record
+            enhanced_df.loc[idx, 'PriorityCode'] = compound_code
+            enhanced_df.loc[idx, 'ListPriorityId'] = list_priority_id
+    
+    return enhanced_df
+```
+
 ## Python Output Specification
 
 ### Required Python Output Format
 
-Python must generate TWO DataFrames using EXACT same unique identifiers:
+Python must generate TWO DataFrames using EXACT same unique identifiers AND proper ListPriorityId values:
 
 ```python
 def generate_database_ready_output(self, processed_df: pd.DataFrame, region_id: int) -> tuple:
@@ -115,7 +286,7 @@ def generate_database_ready_output(self, processed_df: pd.DataFrame, region_id: 
         'OwnerSlug': self._create_owner_slugs(processed_df), # Links to Owner
         
         # Python Pre-Computed Values (replaces SQL UPDATE logic):
-        'ListPriorityId': processed_df['PriorityId'],         # Python scored
+        'ListPriorityId': processed_df['ListPriorityId'],     # FROM ListPriorityManager - CRITICAL!
         'IsOwnerOccupied': processed_df['IsOwnerOccupied'],   # Python computed
         'IsTrust': processed_df['IsTrust'],                   # Python classified
         'IsChurch': processed_df['IsChurch'],                 # Python classified
@@ -256,6 +427,9 @@ BEGIN
     
     -- MERGE Locations (same logic as before, but with pre-processed data)
     UPDATE UploadLog SET ProcessingState = 9 WHERE UploadLogId = @uploadLogId;
+    
+    -- CRITICAL: ListPriorityId is now PRE-COMPUTED by Python
+    -- The SQL procedure should NOT recalculate priority - just use the Python value
     
     MERGE Location AS l
     USING (
@@ -687,10 +861,12 @@ class PropertyProcessor:
 ## Migration Implementation Steps
 
 ### Phase 1: Extend Current Python System
-1. Add `generate_database_ready_output()` method to `PropertyProcessor`
-2. Implement `_create_owner_slugs()` with exact SQL formula
-3. Create `DatabaseIntegrator` class
-4. Add comprehensive testing for OwnerSlug generation
+1. **CRITICAL FIRST**: Create `ListPriorityManager` class for dynamic list code management
+2. Add `generate_database_ready_output()` method to `PropertyProcessor` 
+3. Implement `_create_owner_slugs()` with exact SQL formula
+4. Create `DatabaseIntegrator` class
+5. Integrate `ListPriorityManager` with niche list processing and enhanced code generation
+6. Add comprehensive testing for OwnerSlug generation AND ListPriorityId creation
 
 ### Phase 2: Create Streamlined SQL Procedure
 1. Create `ProcessPythonEnhancedData` stored procedure
@@ -734,11 +910,25 @@ class PropertyProcessor:
 
 ## Risk Mitigation
 
-### Database Compatibility
+### Critical Risk: ListPriorityId Management
+**HIGH RISK**: The dynamic ListPriorityId creation is the most complex part of the migration. If this fails:
+- New list code combinations won't get proper IDs
+- Location records will reference non-existent ListPriorityId values
+- Marketing frequency rules won't apply to new combinations
+- Business operations will be disrupted
+
+**Mitigation Strategy:**
+1. Build and test `ListPriorityManager` in isolation FIRST
+2. Compare Python-generated ListPriorityId values against SQL system on test data
+3. Implement comprehensive logging of all new ListPriority record creation
+4. Have rollback plan ready if ListPriorityId assignment fails
+
+### Database Compatibility  
 - Uses exact same unique identifiers as current system
 - MERGE logic preserved exactly  
 - Monthly update patterns unchanged
 - No breaking changes to existing data
+- **NEW**: ListPriorityId values must match exactly between Python and SQL systems
 
 ### Rollback Plan
 - Keep existing stored procedure as backup
