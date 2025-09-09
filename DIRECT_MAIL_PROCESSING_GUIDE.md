@@ -157,7 +157,8 @@ Place your Excel files in the region folder using these names:
 - `liens.xlsx` - Properties with liens
 - `foreclosure.xlsx` - Pre-foreclosure properties
 - `bankruptcy.xlsx` - Properties with bankruptcy  
-- `tax_delinquencies.xlsx` - Tax delinquent properties
+- `tax_delinquencies.xlsx` - Tax delinquent properties (vendor data)
+- `current_tax_delinquent_YYYYMMDD.xlsx` - Current tax delinquent (city data)
 - `landlords.xlsx` - Tired landlord properties
 - `probate.xlsx` - Probate properties
 - `cash_buyers.xlsx` - Cash buyer properties
@@ -167,6 +168,88 @@ Place your Excel files in the region folder using these names:
 ```bash
 python multi_region_config.py
 ```
+
+## 🏛️ Tax Delinquent Data Processing
+
+### Overview
+The system supports two types of tax delinquent data with different priority levels:
+
+- **CurrentTax** - Direct from city/county (highest priority)
+- **TaxHistory** - From vendor services (lower priority)
+
+### Processing Raw Tax Delinquent Reports
+
+#### Clean City Tax Delinquent Files
+For raw tax delinquent reports directly from localities:
+
+```bash
+# Clean a city tax delinquent report
+python tools/clean_tax_delinquent.py --input "Real Estate Delinquent List - 9-2-2025.xlsx" --region lynchburg_city_va --date 20250902
+
+# Auto-detect date from filename
+python tools/clean_tax_delinquent.py --input "Tax_Report_9-2-2025.xlsx" --region roanoke_city_va
+```
+
+**Input:** Raw city tax delinquent report with columns like:
+- Parcel ID, Current Owner, Location/Mailing Address, Tax amounts
+
+**Output:** Clean niche file with standardized columns:
+- `regions/lynchburg_city_va/lynchburg_city_va_tax_delinquent_20250902.xlsx`
+
+#### Processing Results
+The cleaned file will have proper mailing address format matching other niche files:
+- **Mailing Address** - Street address only
+- **Mailing Unit #** - Apartment/unit number 
+- **Mailing City** - City name
+- **Mailing State** - State code
+- **Mailing Zip** - 5-digit ZIP
+- **Mailing Zip+4** - 4-digit extension
+
+### Tax Data Priority Levels
+
+#### CurrentTax (Highest Priority)
+- **Source:** Direct from city/county billing systems
+- **Detection:** Files starting with region name (e.g., `lynchburg_city_va_tax_delinquent_*.xlsx`)
+- **Priority Codes:** `CurrentTax-ABS1`, `CurrentTax-OWN20`
+- **Contains:** Actual tax amounts owed, current delinquencies
+
+#### TaxHistory (Lower Priority)  
+- **Source:** Vendor services (BiggerPockets, etc.)
+- **Detection:** Third-party files (e.g., `Property Export...Tax Delinquencies.xlsx`)
+- **Priority Codes:** `TaxHistory-ABS1`, `TaxHistory-OWN20`
+- **Contains:** Historical tax issues, rich property data
+
+### Tax Data Workflow
+
+#### Step 1: Clean Raw City Data (if applicable)
+```bash
+# Only needed for raw city reports
+python tools/clean_tax_delinquent.py --input "city_tax_report.xlsx" --region your_region --date YYYYMMDD
+```
+
+#### Step 2: Place Files in Region Folder
+```bash
+# City data (gets CurrentTax priority)
+regions/lynchburg_city_va/lynchburg_city_va_tax_delinquent_20250902.xlsx
+
+# Vendor data (gets TaxHistory priority)  
+regions/lynchburg_city_va/Property Export Lynchburg+City+Co%2C+VA+Tax+Delinquencies.xlsx
+```
+
+#### Step 3: Process with Monthly System
+```bash
+# Both files will be processed with different priority levels
+python monthly_processing_v2.py --region lynchburg_city_va
+```
+
+#### Step 4: Review Priority Codes
+**CurrentTax examples:**
+- `CurrentTax-ABS1` - Current delinquent, old absentee owner
+- `CurrentTax-Liens-ABS1` - Current delinquent with liens
+
+**TaxHistory examples:**  
+- `TaxHistory-ABS1` - Historical tax issues, absentee owner
+- `TaxHistory-Landlord-OWN20` - Historical tax issues, tired landlord
 
 ## 📊 Skip Trace Data Requirements
 
@@ -425,10 +508,32 @@ python skip_trace_processor.py --region roanoke_city_va --enhanced-file "output/
 - Check for extra spaces or unusual formatting in flag columns
 - Verify flag column names match: Owner Bankruptcy, Lien, etc.
 
+### Tax Delinquent Cleaner Issues
+
+**"Could not locate header row"**
+- Raw city tax reports have varying formats
+- Tool looks for "Parcel ID" and "Current Owner" in headers
+- Check if your file has different column names
+- File may already be clean (use directly without cleaning)
+
+**"Mailing address parsing errors"**
+- Tool expects format: "Street, City, State, Zip"
+- Check for unusual address formatting in source data
+- Verify addresses contain commas separating components
+- Some addresses may not parse unit numbers correctly
+
+**"File integration issues"**
+- Ensure cleaned files have required columns: Address, Mailing Address, Owner names
+- Check that Last Sale Date/Amount columns were added (may be empty)
+- Verify file is saved in correct region folder with proper naming
+
 ### Validation Commands
 ```bash
 # Test configuration loading
 python multi_region_config.py
+
+# Test tax delinquent cleaner
+python tools/clean_tax_delinquent.py --input "test_tax_report.xlsx" --region test_region --date 20250902
 
 # Validate specific region initial processing
 python monthly_processing_v2.py --region test_region

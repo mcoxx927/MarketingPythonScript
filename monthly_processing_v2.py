@@ -47,8 +47,12 @@ def _detect_niche_type_from_filename(filename: str) -> str:
         return 'Bankruptcy'
     elif 'landlord' in filename_lower or 'tired' in filename_lower:
         return 'Landlord'
-    elif 'tax' in filename_lower and 'delinq' in filename_lower:
-        return 'Tax'
+    elif ('tax' in filename_lower and 'delinq' in filename_lower) or ('delinq' in filename_lower):
+        # Distinguish between current city tax delinquencies and historical vendor data
+        if 'current' in filename_lower or filename_lower.startswith(('roanoke_', 'lynchburg_', 'norfolk_')):
+            return 'CurrentTax'  # Higher priority - direct from locality
+        else:
+            return 'TaxHistory'  # Lower priority - historical vendor data
     elif 'probate' in filename_lower:
         return 'Probate'
     elif 'interfamily' in filename_lower or 'family' in filename_lower:
