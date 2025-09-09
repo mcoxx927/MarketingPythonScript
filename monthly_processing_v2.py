@@ -61,6 +61,8 @@ def _detect_niche_type_from_filename(filename: str) -> str:
         return 'CashBuyer'
     elif 'vacant' in filename_lower:
         return 'Vacant'
+    elif 'code' in filename_lower and 'enforcement' in filename_lower:
+        return 'CodeEnforcement'
     else:
         return 'Other'
 

@@ -1,0 +1,101 @@
+{
+  "data_sources": {
+    "code_enforcement": {
+      "description": "Municipal code enforcement violations and citations",
+      "format_type": "tabular",
+      "detection_keywords": ["code", "enforcement", "violation", "citation"],
+      "required_columns": ["CASE NO", "PARCEL NO", "SITE ADDRESS", "OWNER NAME"],
+      "column_mapping": {
+        "parcel_id": ["PARCEL NO", "PARCEL NUMBER", "PARCEL_ID"],
+        "owner_name": ["OWNER NAME", "PROPERTY OWNER", "CURRENT OWNER"],
+        "address": ["SITE ADDRESS", "PROPERTY ADDRESS", "ADDRESS"],
+        "case_number": ["CASE NO", "CASE NUMBER", "CITATION NO"],
+        "case_type": ["CASE TYPE", "VIOLATION TYPE", "CITATION TYPE"],
+        "status": ["STATUS", "CASE STATUS"]
+      },
+      "distress_indicators": ["CITED", "VIOLATION", "NON-COMPLIANT", "OVERDUE"],
+      "regions": ["roanoke_city_va", "lynchburg_city_va", "virginia_beach_city_va"]
+    },
+    "tax_delinquent": {
+      "description": "Properties with delinquent tax payments",
+      "format_type": "report_layout",
+      "detection_keywords": ["tax", "delinquent", "delinq", "unpaid"],
+      "distress_indicators": ["DELINQUENT", "UNPAID", "OVERDUE"],
+      "regions": ["lynchburg_city_va", "campbell_county_va"]
+    },
+    "permits": {
+      "description": "Building permits and construction projects",
+      "format_type": "tabular", 
+      "detection_keywords": ["permit", "building", "construction"],
+      "column_mapping": {
+        "parcel_id": ["PARCEL", "PARCEL_ID", "PIN"],
+        "owner_name": ["OWNER", "APPLICANT", "PROPERTY OWNER"],
+        "address": ["ADDRESS", "SITE ADDRESS", "PROPERTY ADDRESS"],
+        "permit_number": ["PERMIT NO", "PERMIT NUMBER"],
+        "permit_type": ["PERMIT TYPE", "WORK TYPE"],
+        "status": ["STATUS", "PERMIT STATUS"]
+      },
+      "distress_indicators": ["EXPIRED", "REVOKED", "VIOLATION"]
+    },
+    "foreclosure": {
+      "description": "Properties in foreclosure proceedings",
+      "format_type": "tabular",
+      "detection_keywords": ["foreclosure", "trustee", "deed"],
+      "column_mapping": {
+        "parcel_id": ["PARCEL", "MAP_ID", "PIN"],
+        "owner_name": ["OWNER", "GRANTOR", "BORROWER"],
+        "address": ["ADDRESS", "PROPERTY ADDRESS"],
+        "sale_date": ["SALE DATE", "AUCTION DATE"],
+        "amount": ["AMOUNT", "DEBT AMOUNT", "SALE PRICE"]
+      },
+      "distress_indicators": ["FORECLOSURE", "TRUSTEE SALE", "DEFAULT"]
+    },
+    "liens": {
+      "description": "Properties with recorded liens",
+      "format_type": "tabular", 
+      "detection_keywords": ["lien", "judgment", "mechanic"],
+      "column_mapping": {
+        "parcel_id": ["PARCEL", "PIN", "MAP_ID"],
+        "owner_name": ["OWNER", "DEBTOR"],
+        "address": ["ADDRESS", "PROPERTY ADDRESS"],
+        "lien_amount": ["AMOUNT", "LIEN AMOUNT"],
+        "lien_type": ["LIEN TYPE", "TYPE"]
+      },
+      "distress_indicators": ["LIEN", "JUDGMENT", "DEBT"]
+    }
+  },
+  "standard_output_format": {
+    "required_fields": [
+      "Parcel ID", "Current Owner", "Owner 1 Last Name", "Owner 1 First Name",
+      "Address", "City", "State", "Zip", "Last Sale Date", "Last Sale Amount"
+    ],
+    "mailing_fields": [
+      "Mailing Address", "Mailing Unit #", "Mailing City", "Mailing State",
+      "Mailing Zip", "Mailing Zip+4"
+    ],
+    "data_source_fields": {
+      "code_enforcement": ["Case Number", "Case Type", "Status"],
+      "tax_delinquent": ["Tax Amount", "Penalty Amount", "Interest Amount", "Total Amount"],
+      "permits": ["Permit Number", "Permit Type", "Status"],
+      "foreclosure": ["Sale Date", "Sale Amount", "Status"],
+      "liens": ["Lien Amount", "Lien Type"]
+    }
+  },
+  "regional_variations": {
+    "roanoke_city_va": {
+      "data_sources": ["code_enforcement", "permits"],
+      "address_format": "standard",
+      "parcel_id_format": "numeric"
+    },
+    "lynchburg_city_va": {
+      "data_sources": ["tax_delinquent", "code_enforcement"],
+      "address_format": "standard", 
+      "parcel_id_format": "alphanumeric"
+    },
+    "virginia_beach_city_va": {
+      "data_sources": ["code_enforcement", "permits", "foreclosure"],
+      "address_format": "standard",
+      "parcel_id_format": "numeric"
+    }
+  }
+}
