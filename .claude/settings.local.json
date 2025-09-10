@@ -6,7 +6,8 @@
       "Read(/C:\\Users\\1\\Documents\\GitHub\\MarketingPythonScript/**)",
       "Read(/C:\\Users\\1\\Documents\\GitHub\\MarketingPythonScript\\regions\\roanoke_county_va/**)",
       "Read(/C:\\Users\\1\\Documents\\GitHub\\MarketingPythonScript/**)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Read(//c/Users/1/Documents/GitHub/Marketing-Program/**)"
     ],
     "deny": [],
     "ask": []

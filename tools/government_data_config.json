@@ -1,0 +1,92 @@
+{
+  "data_sources": {
+    "code_enforcement": {
+      "description": "Municipal code enforcement violations and citations",
+      "format_type": "tabular",
+      "detection_keywords": [
+        "code",
+        "enforcement",
+        "violation",
+        "citation"
+      ],
+      "required_columns": [
+        "CASE NO",
+        "PARCEL NO",
+        "SITE ADDRESS",
+        "OWNER NAME"
+      ],
+      "gis_augmentation": true,
+      "priority": "high"
+    },
+    "tax_delinquent": {
+      "description": "Properties with delinquent tax payments",
+      "format_type": "report_layout",
+      "detection_keywords": [
+        "tax",
+        "delinquent",
+        "delinq",
+        "unpaid"
+      ],
+      "priority": "highest"
+    },
+    "building_permits": {
+      "description": "Building permits and construction projects",
+      "format_type": "tabular",
+      "detection_keywords": [
+        "permit",
+        "building",
+        "construction"
+      ],
+      "gis_augmentation": true,
+      "priority": "medium"
+    },
+    "housing_violations": {
+      "description": "Housing code violations and maintenance issues",
+      "format_type": "tabular",
+      "detection_keywords": [
+        "housing",
+        "violation",
+        "maintenance",
+        "habitability"
+      ],
+      "gis_augmentation": true,
+      "priority": "high"
+    }
+  },
+  "gis_integration": {
+    "enabled": true,
+    "default_gis_file": "ParcelsRoanokeCity.csv",
+    "parcel_id_column": "TAXID",
+    "required_columns": [
+      "TAXID",
+      "LOCADDR",
+      "OWNER",
+      "OWNERADDR1",
+      "MAILCITY",
+      "MAILSTATE",
+      "MAINZIPCOD"
+    ],
+    "augmentation_fields": [
+      "City",
+      "State",
+      "Zip",
+      "Last Sale Date",
+      "Last Sale Amount",
+      "Mailing Address",
+      "Mailing City",
+      "Mailing State",
+      "Mailing Zip",
+      "Property Type",
+      "Total Assessed Value",
+      "Square Feet",
+      "Acres"
+    ]
+  },
+  "processing_settings": {
+    "auto_detect_data_type": true,
+    "require_parcel_id": false,
+    "address_normalization": true,
+    "duplicate_handling": "keep_first",
+    "output_format": "excel"
+  }
+}

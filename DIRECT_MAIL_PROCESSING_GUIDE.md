@@ -63,9 +63,162 @@ python monthly_processing_v2.py --region roanoke_city_va
 python monthly_processing_v2.py --all-regions
 ```
 
+## 🏛️ Government Data Integration
+
+### Overview
+The system now supports direct integration of government data sources with GIS augmentation for complete property information. Government data provides highly targeted distress indicators directly from municipal sources.
+
+### Supported Government Data Types
+
+**Tier 1: GIS-Augmented (Best Quality)**
+- **Code Enforcement** - Violations, citations, compliance issues
+- **Building Permits** - Construction activity, property improvements
+- **Housing Violations** - Property maintenance issues
+
+**Tier 2: Direct Government (High Quality)**  
+- **Current Tax Delinquent** - Active tax delinquencies from city/county
+- **Current Violations** - Recent violations from departments
+
+**Tier 3: Vendor Data (Standard Quality)**
+- **Historical Tax Data** - Historical tax issues from data providers
+- **Bulk Distress Data** - Aggregated distress indicators
+
+### Government Data Processing Workflow
+
+#### Step 1: Collect Raw Government Data
+```bash
+# Create staging area (one-time setup)
+mkdir -p government_data/roanoke_city_va/raw
+mkdir -p government_data/roanoke_city_va/gis
+
+# Place raw government files
+government_data/roanoke_city_va/raw/
+├── Code Enforcement Cases Cited 2-25-2025 to 6-25-2025.xlsx
+├── Real Estate Delinquent List - 9-2-2025.xlsx
+└── Building Permits Q3 2025.xlsx
+
+# Place GIS/bulk property data (periodic updates)
+government_data/roanoke_city_va/gis/
+└── ParcelsRoanokeCity.csv
+```
+
+#### Step 2: Process Government Data
+```bash
+# Code enforcement with GIS augmentation (RECOMMENDED)
+python tools/clean_code_enforcement.py \
+  --input "government_data/roanoke_city_va/raw/Code Enforcement Cases Cited 2-25-2025 to 6-25-2025.xlsx" \
+  --region roanoke_city_va
+
+# Tax delinquent reports
+python tools/clean_tax_delinquent.py \
+  --input "government_data/roanoke_city_va/raw/Real Estate Delinquent List - 9-2-2025.xlsx" \
+  --region roanoke_city_va \
+  --date 20250902
+```
+
+**Results:** Clean niche files automatically placed in region folders:
+- `regions/roanoke_city_va/roanoke_city_va_code_enforcement_20250225.xlsx`
+- `regions/roanoke_city_va/roanoke_city_va_tax_delinquent_20250902.xlsx`
+
+#### Step 3: Benefits of GIS Augmentation
+
+**Code Enforcement with GIS Enhancement:**
+- ✅ **100% mailing addresses** from GIS property data
+- ✅ **Complete property details** (sale dates, assessed values, square footage)
+- ✅ **Ready for insertion** if no match in main region file
+- ✅ **Immediate mail campaigns** possible
+
+**Example GIS-enhanced record:**
+```
+Property: 1725 PADBURY AVE SE
+Owner: COLMENAREJO ROBERTO MARIVELA  
+Mailing: 2727 N 32ND ST #215, PHOENIX, AZ 85008
+Sale: 2023/10/26, Assessed: $72,400
+Case: INOPERABLE VEHICLE (COMPLIED)
+```
+
+#### Step 4: Integration with Monthly Processing
+Government data files are automatically detected and processed:
+
+```bash
+# Process region (includes all government niche files)
+python monthly_processing_v2.py --region roanoke_city_va
+```
+
+**Enhanced Priority Codes:**
+- `CodeEnforcement-ABS1` - Code violation on absentee property
+- `CurrentTax-Liens-BUY2` - Current tax delinquent with liens, recent buyer
+- `STBankruptcy-CodeEnforcement-ABS1` - Skip trace + government + base priority
+
+### Government Data Configuration
+
+#### Auto-Detection Rules
+Government data files are automatically detected by filename patterns:
+
+```python
+# In monthly_processing_v2.py
+def _detect_niche_type_from_filename(filename: str) -> str:
+    filename_lower = filename.lower()
+    
+    if 'code' in filename_lower and 'enforcement' in filename_lower:
+        return 'CodeEnforcement'
+    elif ('tax' in filename_lower and 'delinq' in filename_lower):
+        if filename_lower.startswith(('roanoke_', 'lynchburg_', 'norfolk_')):
+            return 'CurrentTax'  # Higher priority - direct from locality
+        else:
+            return 'TaxHistory'  # Lower priority - historical vendor data
+    # ... other detection rules
+```
+
+#### Data Source Priorities
+**CurrentTax** (Highest Priority)
+- Direct from city/county tax systems
+- Files starting with region name get `CurrentTax-` prefix
+- Example: `CurrentTax-ABS1`, `CurrentTax-Liens-BUY2`
+
+**CodeEnforcement** (High Priority)
+- Municipal violations and citations
+- GIS-augmented for complete property data
+- Example: `CodeEnforcement-ABS1`, `CodeEnforcement-Landlord-OWN20`
+
+**TaxHistory** (Standard Priority)
+- Historical tax data from vendors
+- Third-party files get `TaxHistory-` prefix
+- Example: `TaxHistory-ABS1`, `TaxHistory-BUY2`
+
+### Government Data Quality Metrics
+
+#### GIS-Augmented Sources (Code Enforcement)
+- **100%** complete mailing addresses
+- **97%** sale dates available
+- **69%** sale amounts available
+- **100%** property details (assessed values, etc.)
+- **Ready for direct mail** without skip trace
+
+#### Direct Government Sources (Tax Delinquent)
+- **100%** property addresses
+- **Variable** mailing addresses (0-60% depending on source)
+- **Authoritative** violation/delinquency data
+- **May require** skip trace for mailing addresses
+
 ## 🔄 Complete Direct Mail Cycle
 
-### Phase 1: Initial Processing (Monthly)
+### Phase 1: Government Data Collection & Processing (As Needed)
+Collect and process government data sources:
+
+```bash
+# Process code enforcement with GIS augmentation
+python tools/clean_code_enforcement.py \
+  --input "Code Enforcement Cases.xlsx" \
+  --region roanoke_city_va
+
+# Process tax delinquent reports  
+python tools/clean_tax_delinquent.py \
+  --input "Tax Delinquent Report.xlsx" \
+  --region roanoke_city_va
+```
+
+### Phase 2: Initial Processing (Monthly)
 Process property data and create enhanced files with priority codes:
 
 ```bash
@@ -508,7 +661,33 @@ python skip_trace_processor.py --region roanoke_city_va --enhanced-file "output/
 - Check for extra spaces or unusual formatting in flag columns
 - Verify flag column names match: Owner Bankruptcy, Lien, etc.
 
-### Tax Delinquent Cleaner Issues
+### Government Data Processing Issues
+
+#### Code Enforcement Issues
+
+**"GIS file not found"**
+- Verify GIS file exists: `ParcelsRoanokeCity.csv` in working directory
+- Use `--gis-file` parameter to specify different location
+- Use `--no-gis` flag to process without GIS augmentation
+- Check file permissions and accessibility
+
+**"0% GIS augmentation"**
+- Check parcel ID format mismatch (e.g., `123-4567` vs `1234567`)
+- Verify TAXID column exists in GIS file
+- Ensure parcel IDs in code enforcement file match GIS format
+- Check for data type issues (numeric vs string)
+
+**"Missing expected columns"**
+- Code enforcement file must contain: CASE NO, PARCEL NO, SITE ADDRESS, OWNER NAME
+- Check for column name variations (case sensitive)
+- Verify file is from code enforcement department (not other violation types)
+
+**"Permission denied writing output"**
+- Output file may be open in Excel
+- Check region folder write permissions
+- Use different output date with `--date` parameter
+
+#### Tax Delinquent Cleaner Issues
 
 **"Could not locate header row"**
 - Raw city tax reports have varying formats
@@ -526,6 +705,46 @@ python skip_trace_processor.py --region roanoke_city_va --enhanced-file "output/
 - Ensure cleaned files have required columns: Address, Mailing Address, Owner names
 - Check that Last Sale Date/Amount columns were added (may be empty)
 - Verify file is saved in correct region folder with proper naming
+
+#### GIS Data Issues
+
+**"GIS file format problems"**
+- Verify CSV file is properly formatted
+- Check for required columns: TAXID, LOCADDR, OWNER, OWNERADDR1, MAILCITY, etc.
+- Ensure no header row corruption or encoding issues
+- File size should be reasonable (not truncated)
+
+**"Parcel ID format mismatches"**
+- GIS uses different parcel formats than code enforcement
+- Check for leading zeros, dashes, or other formatting differences
+- Example: GIS `123-4567` vs Code Enforcement `1234567`
+- May need parcel format standardization
+
+**"Incomplete GIS data"**
+- Some parcels may have missing mailing addresses in GIS
+- Check completeness of OWNERADDR1, MAILCITY, MAILSTATE columns
+- Consider supplementing with additional data sources
+- Use GIS data validation before processing
+
+#### Monthly Processing Integration
+
+**"Government niche files not detected"**
+- Check filename patterns for auto-detection
+- Verify files are in correct region folder
+- Check that _detect_niche_type_from_filename() includes your file type
+- Manually verify file naming conventions
+
+**"Priority codes not appending correctly"**
+- Check address normalization between main region and government data
+- Verify parcel ID matching if applicable
+- Review processing logs for matching statistics
+- Check for duplicate addresses causing conflicts
+
+**"Government data inserting instead of updating"**
+- Address matching may be failing
+- Check address format differences between sources
+- Review normalized address output in logs
+- Consider manual address standardization
 
 ### Validation Commands
 ```bash
