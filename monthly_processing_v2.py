@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 import re
 
 from multi_region_config import MultiRegionConfigManager
-from property_processor import PropertyProcessor
+from enhanced_property_processor import EnhancedPropertyProcessor, DistressFlagManager
 
 # Set up logging
 logging.basicConfig(
@@ -188,13 +188,33 @@ def _cleanup_fips_mismatches(region_dir: Path, expected_fips: str, fips_mismatch
 
 def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche_type: str) -> tuple:
     """
-    Update main region DataFrame with niche data.
+    Update main region DataFrame with niche data using boolean flag architecture.
     
     Returns:
-        tuple: (updates_count, inserts_count)
+        tuple: (updated_main_df, updates_count, inserts_count)
     """
     updates_count = 0
     inserts_count = 0
+    
+    # Mapping from niche types to boolean flag column names
+    niche_flag_columns = {
+        'Liens': 'HasLiens',
+        'PreForeclosure': 'HasForeclosure',
+        'CodeEnforcement': 'HasCodeEnforcement', 
+        'CurrentTax': 'HasCurrentTax',
+        'TaxHistory': 'HasTaxHistory',
+        'Bankruptcy': 'HasBankruptcy',
+        'CashBuyer': 'HasCashBuyer',
+        'InterFamily': 'HasInterFamily',
+        'Landlord': 'HasLandlord',
+        'Probate': 'HasProbate'
+    }
+    
+    # Get the boolean flag column for this niche type
+    flag_column = niche_flag_columns.get(niche_type)
+    if not flag_column:
+        logger.warning(f"Unknown niche type for boolean flags: {niche_type}")
+        return 0, 0
     
     # Normalize addresses for matching
     main_df['_NormalizedAddress'] = main_df['Address'].apply(_normalize_address)
@@ -216,20 +236,18 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
         if address in main_address_map:
             main_indices = main_address_map[address]
             
-            # Update all main records with this address
+            # Update all main records with this address by setting boolean flag
             for main_idx in main_indices:
-                current_priority = main_df.loc[main_idx, 'PriorityCode']
-                
-                if niche_type not in current_priority:
-                    main_df.loc[main_idx, 'PriorityCode'] = f"{niche_type}-{current_priority}"
-                    main_df.loc[main_idx, 'PriorityName'] = f"{niche_type} Enhanced - {main_df.loc[main_idx, 'PriorityName']}"
+                # Set the boolean flag for this niche type
+                if not main_df.loc[main_idx, flag_column]:  # Only count if not already set
+                    main_df.loc[main_idx, flag_column] = True
                     updates_count += 1
     
     # Process inserts in bulk
     insert_records = niche_df_clean[~existing_addresses].copy()
     
     if len(insert_records) > 0:
-        # Create new records DataFrame
+        # Create new records DataFrame with boolean flag architecture
         new_records = pd.DataFrame({
             'OwnerName': insert_records.get('Owner 1 Last Name', '').astype(str) + ' ' + insert_records.get('Owner 1 First Name', '').astype(str),
             'Address': insert_records.get('Address', ''),
@@ -249,9 +267,30 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
             'IsOwnerOccupied': False,
             'OwnerGrantorMatch': False,
             
-            # Priority information 
+            # Property classification  
+            'PropertyCategory': 'DEVELOPED',  # Assume developed unless raw land detection done
+            
+            # Boolean distress flags (all default to False, then set specific one)
+            'HasLiens': False,
+            'HasForeclosure': False, 
+            'HasCodeEnforcement': False,
+            'HasCurrentTax': False,
+            'HasTaxHistory': False,
+            'HasBankruptcy': False,
+            'HasCashBuyer': False,
+            'HasInterFamily': False,
+            'HasLandlord': False,
+            'HasProbate': False,
+            'HasSTBankruptcy': False,
+            'HasSTForeclosure': False,
+            'HasSTLien': False,
+            'HasSTJudgment': False,
+            'HasSTQuitclaim': False,
+            'HasSTDeceased': False,
+            
+            # Single priority system (niche-only records get default)
+            'PriorityCode': 'DEFAULT',  # Default priority for niche-only records
             'PriorityId': NICHE_ONLY_PRIORITY_ID,
-            'PriorityCode': niche_type,
             'PriorityName': f'{niche_type} List Only',
             
             # Processing metadata
@@ -259,6 +298,9 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
             'ParsedSaleAmount': None,
             '_NormalizedAddress': insert_records['_NormalizedAddress']
         })
+        
+        # Set the specific boolean flag for this niche type
+        new_records[flag_column] = True
         
         # Concatenate new records to main DataFrame with proper error handling
         try:
@@ -286,7 +328,7 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
     if '_NormalizedAddress' in niche_df.columns:
         niche_df.drop(columns=['_NormalizedAddress'], inplace=True)
     
-    return updates_count, inserts_count
+    return main_df, updates_count, inserts_count
 
 def process_region(region_key: str, config_manager: MultiRegionConfigManager, auto_clean_fips: bool = False) -> Dict:
     """
@@ -445,13 +487,14 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager, au
             print(f"   Recent sales records added: {total_added:,}")
             print(f"   Combined dataset size: {len(main_df):,}")
             
-            # Create property processor with region-specific settings
-            processor = PropertyProcessor(
-                region_input_date1=config.region_input_date1,
-                region_input_date2=config.region_input_date2,
-                region_input_amount1=config.region_input_amount1,
-                region_input_amount2=config.region_input_amount2
-            )
+            # Create enhanced property processor with region-specific settings
+            processor_config = {
+                'region_input_date1': config.region_input_date1,
+                'region_input_date2': config.region_input_date2,
+                'region_input_amount1': config.region_input_amount1,
+                'region_input_amount2': config.region_input_amount2
+            }
+            processor = EnhancedPropertyProcessor(processor_config)
             
             # Process the combined dataset
             print("\\nSTEP 2: Processing Combined Dataset")
@@ -476,13 +519,14 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager, au
             print("-" * 50)
             print(f"Processing main file: {main_file.name} ({main_file.stat().st_size:,} bytes)")
             
-            # Create property processor with region-specific settings
-            processor = PropertyProcessor(
-                region_input_date1=config.region_input_date1,
-                region_input_date2=config.region_input_date2,
-                region_input_amount1=config.region_input_amount1,
-                region_input_amount2=config.region_input_amount2
-            )
+            # Create enhanced property processor with region-specific settings
+            processor_config = {
+                'region_input_date1': config.region_input_date1,
+                'region_input_date2': config.region_input_date2,
+                'region_input_amount1': config.region_input_amount1,
+                'region_input_amount2': config.region_input_amount2
+            }
+            processor = EnhancedPropertyProcessor(processor_config)
             
             # Process main file
             main_result = processor.process_excel_file(str(main_file))
@@ -553,7 +597,7 @@ def process_region(region_key: str, config_manager: MultiRegionConfigManager, au
                     
                     # Update main region with niche data
                     try:
-                        updates, inserts = _update_main_with_niche(main_result, niche_df, niche_type)
+                        main_result, updates, inserts = _update_main_with_niche(main_result, niche_df, niche_type)
                         
                         total_updates += updates
                         total_inserts += inserts

@@ -2,77 +2,7 @@ import argparse
 import re
 from pathlib import Path
 import pandas as pd
-
-
-def load_gis_data(gis_file_path: Path) -> pd.DataFrame:
-    """Load and prepare GIS parcel data for augmentation"""
-    if not gis_file_path.exists():
-        raise FileNotFoundError(f"GIS file not found: {gis_file_path}")
-    
-    gis_df = pd.read_csv(gis_file_path)
-    
-    # Standardize key columns for matching
-    gis_df['_ParcelKey'] = gis_df['TAXID'].astype(str)
-    
-    print(f"Loaded GIS data: {len(gis_df):,} parcels")
-    return gis_df
-
-
-def extract_gis_data(gis_row) -> dict:
-    """Extract relevant data from GIS record for niche format"""
-    
-    # Parse sale dates (handle various formats)
-    def parse_sale_date(date_str):
-        if pd.isna(date_str) or str(date_str) in ['1776/07/04 00:00:01+00', '1900/01/01 00:00:01+00']:
-            return ""
-        try:
-            # Handle various date formats from GIS
-            date_clean = str(date_str).split(' ')[0]  # Remove time component
-            if '/' in date_clean and not date_clean.startswith('1776') and not date_clean.startswith('1900'):
-                return date_clean
-        except:
-            pass
-        return ""
-    
-    # Parse sale amounts
-    def parse_sale_amount(amount):
-        if pd.isna(amount) or amount == 0.0:
-            return ""
-        return f"${amount:,.0f}"
-    
-    # Extract mailing zip (handle different formats)
-    def format_zip(zip_val):
-        if pd.isna(zip_val):
-            return ""
-        zip_str = str(zip_val).strip()
-        if len(zip_str) == 5 and zip_str.isdigit():
-            return zip_str
-        elif len(zip_str) == 4 and zip_str.isdigit():
-            return f"0{zip_str}"  # Add leading zero for 4-digit zips
-        return zip_str
-    
-    return {
-        'City': 'ROANOKE',  # All Roanoke City parcels
-        'State': 'VA',
-        'Zip': '',  # GIS doesn't have property zip consistently
-        'Last Sale Date': parse_sale_date(gis_row.get('SALEDATE1', '')),
-        'Last Sale Amount': parse_sale_amount(gis_row.get('SALEAMT1', 0)),
-        'Mailing Address': str(gis_row.get('OWNERADDR1', '')).strip(),
-        'Mailing Unit #': '',  # Would need parsing from OWNERADDR1
-        'Mailing City': str(gis_row.get('MAILCITY', '')).strip(),
-        'Mailing State': str(gis_row.get('MAILSTATE', '')).strip(),
-        'Mailing Zip': format_zip(gis_row.get('MAINZIPCOD', '')),
-        'Mailing Zip+4': '',  # Not available in this GIS data
-        # Additional GIS data for analysis
-        'Property Type': str(gis_row.get('PROPERTYDE', '')).strip(),
-        'Total Assessed Value': gis_row.get('TOTALVAL1', ''),
-        'Land Value': gis_row.get('LANDVAL1', ''),
-        'Building Value': gis_row.get('DWELLINGVA', ''),
-        'Square Feet': gis_row.get('SQFT', ''),
-        'Acres': gis_row.get('ACRES', ''),
-        'Zone Description': str(gis_row.get('ZONEDESC', '')).strip(),
-        'Legal Description': str(gis_row.get('LEGALDESC', '')).strip()[:100],  # Truncate long descriptions
-    }
+from gis_utils import load_gis_data, augment_with_gis
 
 
 def parse_owner(name: str) -> tuple[str, str]:
@@ -149,18 +79,8 @@ def clean_code_enforcement_excel(input_path: Path, gis_data: pd.DataFrame = None
             "Status": status,
         }
         
-        # Augment with GIS data if available
-        if gis_data is not None and parcel_id:
-            gis_match = gis_data[gis_data['_ParcelKey'] == parcel_id]
-            if len(gis_match) > 0:
-                gis_row = gis_match.iloc[0]
-                gis_fields = extract_gis_data(gis_row)
-                record.update(gis_fields)
-                record['Data_Source'] = 'GIS_Augmented'
-            else:
-                record['Data_Source'] = 'Code_Enforcement_Only'
-        else:
-            record['Data_Source'] = 'Code_Enforcement_Only'
+        # Augment with GIS data using shared utility
+        record = augment_with_gis(record, parcel_id, gis_data)
         
         records.append(record)
     
@@ -242,7 +162,7 @@ def main():
     print(f"Saved augmented niche file: {output_path}")
     
     # Show sample of augmented data
-    if gis_data is not None and gis_augmented > 0:
+    if gis_data is not None and df_clean['Data_Source'].str.contains('GIS_Augmented', na=False).sum() > 0:
         print(f"\nSample of GIS-augmented records:")
         augmented_sample = df_clean[df_clean['Data_Source'] == 'GIS_Augmented'].head(3)
         for i, (_, row) in enumerate(augmented_sample.iterrows()):

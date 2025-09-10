@@ -143,6 +143,12 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
         enhanced_df['Golden_Zip'] = None
         enhanced_df['Golden_Address_Differs'] = False
         enhanced_df['ST_Flags'] = ''
+        
+        # Initialize skip trace boolean flag columns
+        st_flag_columns = ['HasSTBankruptcy', 'HasSTForeclosure', 'HasSTLien', 'HasSTJudgment', 'HasSTQuitclaim', 'HasSTDeceased']
+        for col in st_flag_columns:
+            if col not in enhanced_df.columns:
+                enhanced_df[col] = False
         return enhanced_df
     
     logger.info(f"Found {len(st_region_data)} skip trace records for FIPS {region_fips}")
@@ -154,6 +160,12 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
     enhanced_df['Golden_Zip'] = None
     enhanced_df['Golden_Address_Differs'] = False  
     enhanced_df['ST_Flags'] = ''
+    
+    # Initialize skip trace boolean flag columns if they don't exist
+    st_flag_columns = ['HasSTBankruptcy', 'HasSTForeclosure', 'HasSTLien', 'HasSTJudgment', 'HasSTQuitclaim', 'HasSTDeceased']
+    for col in st_flag_columns:
+        if col not in enhanced_df.columns:
+            enhanced_df[col] = False
     
     matches_apn = 0
     matches_address = 0
@@ -281,26 +293,30 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
     logger.info(f"Address-only fallback matches: {fallback_matches}")
     logger.info(f"Total address matches: {matches_address}")
     
-    # Phase 3: Update priority codes for records with ST flags
-    logger.info("Phase 3: Updating priority codes with skip trace flags...")
-    priority_updates = 0
+    # Phase 3: Update boolean skip trace flags for records with ST flags
+    logger.info("Phase 3: Updating boolean skip trace flags...")
+    flag_updates = 0
+    
+    # Mapping of ST flags to boolean column names
+    st_flag_mapping = {
+        'STBankruptcy': 'HasSTBankruptcy',
+        'STForeclosure': 'HasSTForeclosure', 
+        'STLien': 'HasSTLien',
+        'STJudgment': 'HasSTJudgment',
+        'STQuitclaim': 'HasSTQuitclaim',
+        'STDeceased': 'HasSTDeceased'
+    }
     
     for idx, row in enhanced_df.iterrows():
         st_flags = row.get('ST_Flags', '')
         if st_flags:
-            current_priority = row.get('PriorityCode', '')
-            current_name = row.get('PriorityName', '')
-            
-            # Add ST flags to priority code (they will stack with existing niche codes)
+            # Set boolean flags for each detected ST flag
             st_flag_list = st_flags.split(',')
             for flag in st_flag_list:
-                if flag not in current_priority:
-                    current_priority = f"{flag}-{current_priority}" if current_priority else flag
-                    current_name = f"{flag} Enhanced - {current_name}" if current_name else f"{flag} Enhanced"
-            
-            enhanced_df.loc[idx, 'PriorityCode'] = current_priority
-            enhanced_df.loc[idx, 'PriorityName'] = current_name
-            priority_updates += 1
+                if flag in st_flag_mapping:
+                    col_name = st_flag_mapping[flag]
+                    enhanced_df.loc[idx, col_name] = True
+                    flag_updates += 1
     
     # Clean up temporary columns if they exist
     temp_columns = ['_NormalizedAddress']
@@ -316,7 +332,7 @@ def _match_skip_trace_hybrid(enhanced_df: pd.DataFrame, skip_trace_df: pd.DataFr
     logger.info(f"  Total records with Golden Address: {enhanced_df['Golden_Address'].notna().sum()}")
     logger.info(f"  Golden Address differs from original: {enhanced_df['Golden_Address_Differs'].sum()}")
     logger.info(f"  Records with ST flags: {(enhanced_df['ST_Flags'] != '').sum()}")
-    logger.info(f"  Priority codes updated: {priority_updates}")
+    logger.info(f"  Skip trace boolean flags updated: {flag_updates}")
     
     return enhanced_df
 
