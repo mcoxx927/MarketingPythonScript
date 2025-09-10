@@ -52,6 +52,7 @@ class EnhancedPropertyRecord:
     has_inter_family: bool = False
     has_landlord: bool = False
     has_probate: bool = False
+    has_inherited: bool = False
     
     # Derived fields
     legacy_priority_code: str = ""    # Compound code for Excel
@@ -113,6 +114,14 @@ class EnhancedPropertyPriorityScorer:
         self.region_input_amount1 = region_config['region_input_amount1']
         self.region_input_amount2 = region_config['region_input_amount2']
         
+        # Create legacy scorer once during initialization to avoid repeated logging
+        self.legacy_scorer = PropertyPriorityScorer(
+            region_input_date1=self.region_input_date1,
+            region_input_date2=self.region_input_date2,
+            region_input_amount1=self.region_input_amount1,
+            region_input_amount2=self.region_input_amount2
+        )
+        
         # Raw land uses PropertyCategory for separation - no special priority codes needed
         
         # Standard developed property priorities (existing logic)
@@ -154,14 +163,8 @@ class EnhancedPropertyPriorityScorer:
     def _score_developed_property(self, row: pd.Series, classification: PropertyClassification) -> EnhancedPropertyRecord:
         """Score developed properties with standard priority codes"""
         
-        # Use existing PropertyPriorityScorer logic
-        legacy_scorer = PropertyPriorityScorer(
-            region_input_date1=self.region_input_date1,
-            region_input_date2=self.region_input_date2,
-            region_input_amount1=self.region_input_amount1,
-            region_input_amount2=self.region_input_amount2
-        )
-        legacy_priority = legacy_scorer.score_property(row, classification)
+        # Use the pre-created legacy scorer to avoid repeated initialization and logging
+        legacy_priority = self.legacy_scorer.score_property(row, classification)
         
         # Extract base code (remove any existing compound parts)
         base_code = legacy_priority.priority_code.split('-')[-1] if '-' in legacy_priority.priority_code else legacy_priority.priority_code
@@ -327,6 +330,7 @@ class EnhancedPropertyProcessor:
             'HasInterFamily': enhanced_record.has_inter_family,
             'HasLandlord': enhanced_record.has_landlord,
             'HasProbate': enhanced_record.has_probate,
+            'HasInherited': enhanced_record.has_inherited,
             'HasSTBankruptcy': enhanced_record.has_st_bankruptcy,
             'HasSTForeclosure': enhanced_record.has_st_foreclosure,
             'HasSTLien': enhanced_record.has_st_lien,

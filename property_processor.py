@@ -39,6 +39,7 @@ class PropertyClassification:
     is_business: bool = False
     is_owner_occupied: bool = False
     owner_grantor_match: bool = False
+    is_inherited: bool = False
 
 @dataclass  
 class PropertyPriority:
@@ -321,6 +322,114 @@ class PropertyClassifier:
         # First words match but full names don't match
         return (owner_words[0] == grantor_words[0] and 
                 owner_name != str(grantor_name).lower())
+    
+    def detect_inherited_property(self, owner_name: str, grantor1_name: str = '', grantor2_name: str = '') -> bool:
+        """
+        Detect if property is likely inherited by comparing owner and grantor surnames.
+        In GIS data, names are formatted as "LASTNAME FIRSTNAME MIDDLENAME".
+        
+        Args:
+            owner_name: Current owner name
+            grantor1_name: First grantor name
+            grantor2_name: Second grantor name
+            
+        Returns:
+            True if likely inherited property, False otherwise
+        """
+        owner_surname = self._extract_surname(owner_name)
+        
+        # Must have a valid owner surname
+        if not owner_surname or len(owner_surname) < 3:
+            return False
+        
+        # Check against grantor1
+        if grantor1_name:
+            grantor1_surname = self._extract_surname(grantor1_name)
+            if grantor1_surname and len(grantor1_surname) >= 3 and owner_surname == grantor1_surname:
+                return True
+        
+        # Check against grantor2
+        if grantor2_name:
+            grantor2_surname = self._extract_surname(grantor2_name)
+            if grantor2_surname and len(grantor2_surname) >= 3 and owner_surname == grantor2_surname:
+                return True
+        
+        return False
+    
+    def _extract_surname(self, name: str) -> str:
+        """
+        Extract surname from name where format is "LASTNAME FIRSTNAME MIDDLENAME".
+        
+        Args:
+            name: Full name string
+            
+        Returns:
+            Extracted surname or empty string if not extractable
+        """
+        if pd.isna(name) or not name:
+            return ''
+        
+        # Clean up the name
+        name = str(name).strip().upper()
+        
+        # Skip business entities and organizations
+        business_indicators = [
+            'LLC', 'INC', 'CORP', 'LTD', 'COMPANY', 'CO', 'CORPORATION', 
+            'INCORPORATED', 'ENTERPRISES', 'HOLDINGS', 'PROPERTIES', 
+            'INVESTMENTS', 'GROUP', 'VENTURES', 'AUTHORITY', 'FOUNDATION',
+            'ASSOCIATION', 'PARTNERSHIP', 'CENTER', 'MEDICAL', 'HOSPITAL', 
+            'CLINIC', 'SERVICES', 'TRUST', 'ESTATE', 'MINISTRY', 'CHURCH'
+        ]
+        
+        if any(indicator in name for indicator in business_indicators):
+            return ''
+        
+        # Skip government entities
+        govt_indicators = ['CITY OF', 'COUNTY OF', 'STATE OF', 'VIRGINIA', 'ROANOKE']
+        if any(indicator in name for indicator in govt_indicators):
+            return ''
+        
+        # Skip inactive entries
+        if '(INACTIVE)' in name or 'INACTIVE' in name or 'MULTIPLE OWNERS' in name:
+            return ''
+        
+        # Handle comma-separated names (Surname, First Middle)
+        if ',' in name:
+            surname = name.split(',')[0].strip()
+            # Validate surname: at least 3 chars for family names, no numbers
+            if len(surname) >= 3 and len(surname) <= 25 and not any(char.isdigit() for char in surname):
+                return surname
+            return ''
+        
+        # Handle joint ownership with "&" - get first person's surname
+        if ' & ' in name:
+            first_person = name.split(' & ')[0].strip()
+            words = first_person.split()
+            if len(words) >= 1:
+                first_word = words[0]
+                # Validate first word as surname
+                if (len(first_word) >= 3 and 
+                    len(first_word) <= 25 and 
+                    not any(char.isdigit() for char in first_word)):
+                    return first_word
+            return ''
+        
+        # For space-separated names, first word is the surname
+        words = name.split()
+        if len(words) >= 1:
+            # Skip if looks like an address
+            address_words = ['STREET', 'ROAD', 'AVENUE', 'LANE', 'DRIVE', 'ST', 'RD', 'AVE', 'SW', 'NW', 'SE', 'NE']
+            if any(word in address_words for word in words):
+                return ''
+            
+            first_word = words[0]
+            # Validate first word as surname
+            if (len(first_word) >= 3 and 
+                len(first_word) <= 25 and 
+                not any(char.isdigit() for char in first_word)):
+                return first_word
+        
+        return ''
 
 class PropertyPriorityScorer:
     """
