@@ -251,6 +251,7 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
     
     if len(insert_records) > 0:
         # Create new records DataFrame with boolean flag architecture
+        # Only include columns that should be in the enhanced main DataFrame
         new_records = pd.DataFrame({
             'OwnerName': insert_records.get('Owner 1 Last Name', '').astype(str) + ' ' + insert_records.get('Owner 1 First Name', '').astype(str),
             'Address': insert_records.get('Address', ''),
@@ -262,13 +263,6 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
             'City': insert_records.get('City', ''),
             'State': insert_records.get('State', ''),
             'Zip': insert_records.get('Zip', ''),
-            
-            # Classification flags (new records default to False)
-            'IsTrust': False,
-            'IsChurch': False,
-            'IsBusiness': False,
-            'IsOwnerOccupied': False,
-            'OwnerGrantorMatch': False,
             
             # Property classification  
             'PropertyCategory': 'DEVELOPED',  # Assume developed unless raw land detection done
@@ -298,8 +292,6 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
             'PriorityName': f'{niche_type} List Only',
             
             # Processing metadata
-            'ParsedSaleDate': pd.to_datetime(VERY_OLD_DATE_STR),
-            'ParsedSaleAmount': None,
             '_NormalizedAddress': insert_records['_NormalizedAddress']
         })
         
@@ -311,9 +303,36 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
             # Validate column compatibility before concatenation
             main_cols = set(main_df.columns)
             new_cols = set(new_records.columns)
+            
+            # Add any missing columns from main DataFrame to new_records with default values
+            missing_cols = main_cols - new_cols - {'_NormalizedAddress'}  # Exclude temp column
+            if missing_cols:
+                for col in missing_cols:
+                    if col.startswith('Has') or col in ['IsTrust', 'IsChurch', 'IsBusiness', 'IsOwnerOccupied', 'OwnerGrantorMatch']:
+                        new_records[col] = False
+                    elif col == 'ParsedSaleDate':
+                        new_records[col] = pd.to_datetime(VERY_OLD_DATE_STR)
+                    elif col == 'ParsedSaleAmount':
+                        new_records[col] = None
+                    else:
+                        # For other columns, try to get from original niche data or use empty/default values
+                        if col in insert_records.columns:
+                            new_records[col] = insert_records[col]
+                        else:
+                            # Default to empty string for string columns, None for others
+                            new_records[col] = '' if new_records.dtypes.get(col, 'object') == 'object' else None
+            
+            # Remove columns that don't exist in main DataFrame from new_records
+            extra_cols = new_cols - main_cols
+            if extra_cols:
+                logger.debug(f"Removing columns not in main DataFrame: {extra_cols}")
+                new_records = new_records.drop(columns=list(extra_cols))
+            
+            # Now check for any remaining incompatibilities
+            new_cols = set(new_records.columns)
             if not new_cols.issubset(main_cols):
-                missing_cols = new_cols - main_cols
-                logger.warning(f"New records have columns not in main DataFrame: {missing_cols}")
+                remaining_cols = new_cols - main_cols
+                logger.warning(f"New records still have columns not in main DataFrame: {remaining_cols}")
             
             # Perform concatenation with memory and index safety
             main_df = pd.concat([main_df, new_records], ignore_index=True, sort=False)

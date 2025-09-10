@@ -52,6 +52,7 @@ class EnhancedPropertyRecord:
     has_inter_family: bool = False
     has_landlord: bool = False
     has_probate: bool = False
+    has_inherited: bool = False
     
     # Derived fields
     legacy_priority_code: str = ""    # Compound code for Excel
@@ -329,6 +330,7 @@ class EnhancedPropertyProcessor:
             'HasInterFamily': enhanced_record.has_inter_family,
             'HasLandlord': enhanced_record.has_landlord,
             'HasProbate': enhanced_record.has_probate,
+            'HasInherited': enhanced_record.has_inherited,
             'HasSTBankruptcy': enhanced_record.has_st_bankruptcy,
             'HasSTForeclosure': enhanced_record.has_st_foreclosure,
             'HasSTLien': enhanced_record.has_st_lien,
