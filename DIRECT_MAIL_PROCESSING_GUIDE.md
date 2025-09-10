@@ -105,12 +105,12 @@ government_data/roanoke_city_va/gis/
 #### Step 2: Process Government Data
 ```bash
 # Code enforcement with GIS augmentation (RECOMMENDED)
-python tools/clean_code_enforcement.py \
+python tools/government_data_standardizer.py --type code_enforcement \
   --input "government_data/roanoke_city_va/raw/Code Enforcement Cases Cited 2-25-2025 to 6-25-2025.xlsx" \
   --region roanoke_city_va
 
 # Tax delinquent reports
-python tools/clean_tax_delinquent.py \
+python tools/government_data_standardizer.py --type tax_delinquent \
   --input "government_data/roanoke_city_va/raw/Real Estate Delinquent List - 9-2-2025.xlsx" \
   --region roanoke_city_va \
   --date 20250902
@@ -208,12 +208,12 @@ Collect and process government data sources:
 
 ```bash
 # Process code enforcement with GIS augmentation
-python tools/clean_code_enforcement.py \
+python tools/government_data_standardizer.py --type code_enforcement \
   --input "Code Enforcement Cases.xlsx" \
   --region roanoke_city_va
 
 # Process tax delinquent reports  
-python tools/clean_tax_delinquent.py \
+python tools/government_data_standardizer.py --type tax_delinquent \
   --input "Tax Delinquent Report.xlsx" \
   --region roanoke_city_va
 ```
@@ -337,10 +337,10 @@ For raw tax delinquent reports directly from localities:
 
 ```bash
 # Clean a city tax delinquent report
-python tools/clean_tax_delinquent.py --input "Real Estate Delinquent List - 9-2-2025.xlsx" --region lynchburg_city_va --date 20250902
+python tools/government_data_standardizer.py --type tax_delinquent --input "Real Estate Delinquent List - 9-2-2025.xlsx" --region lynchburg_city_va --date 20250902
 
 # Auto-detect date from filename
-python tools/clean_tax_delinquent.py --input "Tax_Report_9-2-2025.xlsx" --region roanoke_city_va
+python tools/government_data_standardizer.py --type tax_delinquent --input "Tax_Report_9-2-2025.xlsx" --region roanoke_city_va
 ```
 
 **Input:** Raw city tax delinquent report with columns like:
@@ -377,7 +377,7 @@ The cleaned file will have proper mailing address format matching other niche fi
 #### Step 1: Clean Raw City Data (if applicable)
 ```bash
 # Only needed for raw city reports
-python tools/clean_tax_delinquent.py --input "city_tax_report.xlsx" --region your_region --date YYYYMMDD
+python tools/government_data_standardizer.py --type tax_delinquent --input "city_tax_report.xlsx" --region your_region --date YYYYMMDD
 ```
 
 #### Step 2: Place Files in Region Folder
@@ -752,7 +752,7 @@ python skip_trace_processor.py --region roanoke_city_va --enhanced-file "output/
 python multi_region_config.py
 
 # Test tax delinquent cleaner
-python tools/clean_tax_delinquent.py --input "test_tax_report.xlsx" --region test_region --date 20250902
+python tools/government_data_standardizer.py --type tax_delinquent --input "test_tax_report.xlsx" --region test_region --date 20250902
 
 # Validate specific region initial processing
 python monthly_processing_v2.py --region test_region

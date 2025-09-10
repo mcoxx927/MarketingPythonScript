@@ -63,6 +63,8 @@ def _detect_niche_type_from_filename(filename: str) -> str:
         return 'Vacant'
     elif 'code' in filename_lower and 'enforcement' in filename_lower:
         return 'CodeEnforcement'
+    elif 'inherited' in filename_lower or 'inherit' in filename_lower:
+        return 'Inherited'
     else:
         return 'Other'
 
@@ -207,14 +209,15 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
         'CashBuyer': 'HasCashBuyer',
         'InterFamily': 'HasInterFamily',
         'Landlord': 'HasLandlord',
-        'Probate': 'HasProbate'
+        'Probate': 'HasProbate',
+        'Inherited': 'HasInherited'
     }
     
     # Get the boolean flag column for this niche type
     flag_column = niche_flag_columns.get(niche_type)
     if not flag_column:
         logger.warning(f"Unknown niche type for boolean flags: {niche_type}")
-        return 0, 0
+        return main_df, 0, 0
     
     # Normalize addresses for matching
     main_df['_NormalizedAddress'] = main_df['Address'].apply(_normalize_address)
@@ -281,6 +284,7 @@ def _update_main_with_niche(main_df: pd.DataFrame, niche_df: pd.DataFrame, niche
             'HasInterFamily': False,
             'HasLandlord': False,
             'HasProbate': False,
+            'HasInherited': False,
             'HasSTBankruptcy': False,
             'HasSTForeclosure': False,
             'HasSTLien': False,

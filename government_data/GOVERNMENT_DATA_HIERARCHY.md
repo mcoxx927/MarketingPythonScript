@@ -32,8 +32,8 @@ MarketingPythonScript/
 │   └── ... (other regions)
 ├── tools/                            # Government data processing tools
 │   ├── government_data_standardizer.py      # Framework (future)
-│   ├── clean_code_enforcement.py            # Code enforcement + GIS
-│   ├── clean_tax_delinquent.py             # Tax delinquent reports
+│   ├── government_data_standardizer.py            # Code enforcement + GIS
+│   └── legacy/ (archived old tools)             # Tax delinquent reports
 │   ├── clean_permits.py                    # Building permits (future)
 │   ├── clean_violations.py                 # Housing violations (future)
 │   └── government_data_config.json         # Data source configurations
@@ -66,13 +66,13 @@ government_data/roanoke_city_va/gis/
 ### Phase 2: Data Processing & Augmentation
 ```bash
 # Process code enforcement with GIS augmentation
-python tools/clean_code_enforcement.py \
+python tools/government_data_standardizer.py --type code_enforcement \
   --input "government_data/roanoke_city_va/raw/Code Enforcement Cases Cited 2-25-2025 to 6-25-2025.xlsx" \
   --region roanoke_city_va \
   --gis-file "government_data/roanoke_city_va/gis/ParcelsRoanokeCity.csv"
 
 # Process tax delinquent reports  
-python tools/clean_tax_delinquent.py \
+python tools/government_data_standardizer.py --type tax_delinquent \
   --input "government_data/roanoke_city_va/raw/Real Estate Delinquent List - 9-2-2025.xlsx" \
   --region roanoke_city_va
 
@@ -121,12 +121,12 @@ python skip_trace_processor.py \
 ### Code Enforcement (with GIS)
 ```bash
 # Full augmentation (recommended)
-python tools/clean_code_enforcement.py \
+python tools/government_data_standardizer.py --type code_enforcement \
   --input "raw_code_enforcement.xlsx" \
   --region roanoke_city_va
 
 # Without GIS (basic processing)
-python tools/clean_code_enforcement.py \
+python tools/government_data_standardizer.py --type code_enforcement \
   --input "raw_code_enforcement.xlsx" \
   --region roanoke_city_va \
   --no-gis
@@ -135,7 +135,7 @@ python tools/clean_code_enforcement.py \
 ### Tax Delinquent (city reports)
 ```bash
 # Clean raw city tax report
-python tools/clean_tax_delinquent.py \
+python tools/government_data_standardizer.py --type tax_delinquent \
   --input "Real Estate Delinquent List.xlsx" \
   --region lynchburg_city_va \
   --date 20250902
@@ -182,14 +182,14 @@ for region in roanoke_city_va lynchburg_city_va virginia_beach_va; do
   
   # Code enforcement
   if [ -f "government_data/$region/raw/"*code*enforcement*.xlsx ]; then
-    python tools/clean_code_enforcement.py \
+    python tools/government_data_standardizer.py --type code_enforcement \
       --input government_data/$region/raw/*code*enforcement*.xlsx \
       --region $region
   fi
   
   # Tax delinquent  
   if [ -f "government_data/$region/raw/"*tax*delinq*.xlsx ]; then
-    python tools/clean_tax_delinquent.py \
+    python tools/government_data_standardizer.py --type tax_delinquent \
       --input government_data/$region/raw/*tax*delinq*.xlsx \
       --region $region
   fi

@@ -27,7 +27,7 @@ Archive of processed government data (auto-generated):
 
 ### Code Enforcement (with GIS)
 ```bash
-python tools/clean_code_enforcement.py \
+python tools/government_data_standardizer.py --type code_enforcement \
   --input "government_data/richmond_city_va/raw/Code_Enforcement_Cases.xlsx" \
   --region richmond_city_va \
   --gis-file "government_data/richmond_city_va/gis/ParcelsRichmondCityVa.csv"
@@ -35,7 +35,7 @@ python tools/clean_code_enforcement.py \
 
 ### Tax Delinquent
 ```bash  
-python tools/clean_tax_delinquent.py \
+python tools/government_data_standardizer.py --type tax_delinquent \
   --input "government_data/richmond_city_va/raw/Tax_Delinquent_Report.xlsx" \
   --region richmond_city_va
 ```
